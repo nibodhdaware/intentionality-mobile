@@ -1,0 +1,30 @@
+Intentionality App - SHA Certificates
+
+Package Name: com.nibodhdaware.intentionality
+
+Debug SHA-1:
+D6:AE:E3:B9:3C:22:5E:D0:68:B8:6C:E6:53:F7:E6:30:80:4C:D4:08
+
+Debug SHA-256:
+63:B8:AF:AE:52:02:01:3C:02:C3:07:22:51:3C:F3:49:12:BE:F1:CA:F0:EC:0E:DA:DA:B4:94:F3:C7:08:C2:07
+
+Google OAuth Callback URL:
+https://wsmoiglcfnegltuuwhnh.supabase.co/auth/v1/callback
+
+Supabase URL:
+https://wsmoiglcfnegltuuwhnh.supabase.co
+
+Supabase Key:
+sb_publishable_ernPkyC6EdAA0d31G0X2sw_TZumZ_1l
+
+---
+
+INSTRUCTIONS:
+
+1. Use the SHA-1 above when creating Android OAuth client in Google Cloud Console
+2. Create a SEPARATE Web OAuth client for Supabase with the callback URL
+3. Add the Web Client ID and Secret to Supabase Authentication settings
+4. Add the Android Client ID to "Authorized Client IDs" in Supabase
+
+See GOOGLE_OAUTH_SETUP.md for complete step-by-step instructions.
+

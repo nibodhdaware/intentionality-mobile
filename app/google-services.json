@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "938266027514",
+    "project_id": "intentionality-1ce65",
+    "storage_bucket": "intentionality-1ce65.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:938266027514:android:004ba96a69305b165d3043",
+        "android_client_info": {
+          "package_name": "com.nibodhdaware.intentionality"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "938266027514-vgh2o1odih2hbqpae8h2qe0kbe1ugk94.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4t6XREyNlOQHbdV7IDBQOhAimW6N_0-A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "938266027514-vgh2o1odih2hbqpae8h2qe0kbe1ugk94.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
