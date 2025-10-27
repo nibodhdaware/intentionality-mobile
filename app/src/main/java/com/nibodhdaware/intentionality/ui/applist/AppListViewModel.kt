@@ -17,6 +17,8 @@ import com.nibodhdaware.intentionality.supabase.SupabaseClientManager
 import io.github.jan.supabase.gotrue.auth
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class AppInfo(
     val name: String,
@@ -49,10 +51,21 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
     
     private val _userProfile = MutableStateFlow<UserProfile?>(null)
     val userProfile: StateFlow<UserProfile?> = _userProfile.asStateFlow()
+    
+    private val _isLoadingApps = MutableStateFlow(false)
+    val isLoadingApps: StateFlow<Boolean> = _isLoadingApps.asStateFlow()
+    
+    private val _isInitialized = MutableStateFlow(false)
+    val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
 
     val monitoredApps: StateFlow<List<String>>
-    val installedApps: StateFlow<List<AppInfo>>
+    private val _installedApps = MutableStateFlow<List<AppInfo>>(emptyList())
+    val installedApps: StateFlow<List<AppInfo>> = _installedApps.asStateFlow()
     val filteredApps: StateFlow<List<AppInfo>>
+    
+    private val batchSize = 25  // Load 25 apps at a time for fast, efficient pagination
+    private var allPackageActivities: List<android.content.pm.ResolveInfo> = emptyList()
+    private var currentIndex = 0
 
     init {
         val monitoredAppDao = AppDatabase.getDatabase(application).monitoredAppDao()
@@ -62,20 +75,14 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
             list.map { it.packageName }
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-        installedApps = kotlinx.coroutines.flow.flow {
+        // Get the list of package activities (fast - no sorting or label loading!)
+        viewModelScope.launch(Dispatchers.IO) {
             val pm = getApplication<Application>().packageManager
             val intent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
-            val apps = pm.queryIntentActivities(intent, 0)
-                .map {
-                    AppInfo(
-                        name = it.loadLabel(pm).toString(),
-                        packageName = it.activityInfo.packageName,
-                        icon = it.loadIcon(pm)
-                    )
-                }
-                .sortedBy { it.name.lowercase() }
-            emit(apps)
-        }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+            allPackageActivities = pm.queryIntentActivities(intent, 0)
+            _isInitialized.value = true
+            Log.d("AppListViewModel", "Initialized with ${allPackageActivities.size} apps")
+        }
         
         filteredApps = combine(installedApps, searchQuery) { apps, query ->
             if (query.isBlank()) {
@@ -125,6 +132,41 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
     
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
+    }
+    
+    fun loadNextBatch() {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (_isLoadingApps.value) return@launch
+            if (currentIndex >= allPackageActivities.size) return@launch
+            
+            _isLoadingApps.value = true
+            
+            // Calculate how many apps to load in this batch
+            val endIndex = minOf(currentIndex + batchSize, allPackageActivities.size)
+            val batchActivities = allPackageActivities.subList(currentIndex, endIndex)
+            
+            // Load app info (icons, labels) only for this batch
+            val pm = getApplication<Application>().packageManager
+            val newApps = batchActivities.map { resolveInfo ->
+                AppInfo(
+                    name = resolveInfo.loadLabel(pm).toString(),
+                    packageName = resolveInfo.activityInfo.packageName,
+                    icon = resolveInfo.loadIcon(pm)
+                )
+            }.sortedBy { it.name.lowercase() } // Sort this batch alphabetically
+            
+            // Add to the displayed list (maintaining overall sort order)
+            val currentList = _installedApps.value
+            _installedApps.value = (currentList + newApps).sortedBy { it.name.lowercase() }
+            currentIndex = endIndex
+            
+            Log.d("AppListViewModel", "Loaded batch: $currentIndex / ${allPackageActivities.size} apps")
+            _isLoadingApps.value = false
+        }
+    }
+    
+    fun hasMoreApps(): Boolean {
+        return currentIndex < allPackageActivities.size
     }
 
     fun onAppChecked(packageName: String, isChecked: Boolean) {

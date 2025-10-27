@@ -8,12 +8,12 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.nibodhdaware.intentionality.MainActivity
 import com.nibodhdaware.intentionality.R
 import com.nibodhdaware.intentionality.database.AppDatabase
 import com.nibodhdaware.intentionality.database.MonitoredAppRepository
-import com.nibodhdaware.intentionality.ui.prompt.IntentionPromptActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 
@@ -26,29 +26,37 @@ class AppMonitorService : Service() {
     
     private var lastDetectedApp: String? = null
     private val recentlyPromptedApps = mutableSetOf<String>()
+    private var cachedMonitoredApps: List<String> = emptyList()
+    private var lastCacheUpdate: Long = 0L
     
     companion object {
+        private const val TAG = "AppMonitorService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "app_monitor_channel"
         private const val PROMPT_COOLDOWN_MS = 30000L // 30 seconds cooldown
+        private const val CACHE_REFRESH_INTERVAL_MS = 10000L // Refresh cache every 10 seconds
     }
 
     override fun onCreate() {
         super.onCreate()
+        Log.d(TAG, "===== Service onCreate =====")
         val monitoredAppDao = AppDatabase.getDatabase(this).monitoredAppDao()
         repository = MonitoredAppRepository(monitoredAppDao)
         
         createNotificationChannel()
         startForeground()
+        Log.d(TAG, "Service started in foreground")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        scope.launch {
+        Log.d(TAG, "===== Service onStartCommand =====")
+        scope.launch(Dispatchers.IO) {
             while (true) {
                 checkForegroundApp()
-                delay(2000) // Check every 2 seconds
+                delay(3000) // Check every 3 seconds (reduced frequency for less resource usage)
             }
         }
+        Log.d(TAG, "Monitoring loop started, checking every 3 seconds")
         return START_STICKY
     }
 
@@ -99,21 +107,34 @@ class AppMonitorService : Service() {
         try {
             val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
             val time = System.currentTimeMillis()
+            
+            // Refresh cached monitored apps periodically instead of every check
+            if (time - lastCacheUpdate > CACHE_REFRESH_INTERVAL_MS) {
+                cachedMonitoredApps = repository.allMonitoredApps.first().map { it.packageName }
+                lastCacheUpdate = time
+            }
+            
+            // Query only last 5 seconds instead of 10 for better performance
             val usageStats = usageStatsManager.queryUsageStats(
                 UsageStatsManager.INTERVAL_DAILY,
-                time - 1000 * 10,
+                time - 5000,
                 time
             )
             
             val foregroundApp = usageStats?.maxByOrNull { it.lastTimeUsed }?.packageName
-            val monitoredApps = repository.allMonitoredApps.first().map { it.packageName }
+            
+            // Reduce logging in production for better performance
+            if (foregroundApp != lastDetectedApp) {
+                Log.d(TAG, "App changed: $lastDetectedApp -> $foregroundApp")
+            }
 
             if (foregroundApp != null && 
                 foregroundApp != packageName && // Ignore our own app
-                monitoredApps.contains(foregroundApp) &&
+                cachedMonitoredApps.contains(foregroundApp) &&
                 foregroundApp != lastDetectedApp &&
                 !recentlyPromptedApps.contains(foregroundApp)
             ) {
+                Log.d(TAG, "✅ Showing prompt for: $foregroundApp")
                 lastDetectedApp = foregroundApp
                 showPrompt(foregroundApp)
                 
@@ -123,31 +144,51 @@ class AppMonitorService : Service() {
                     delay(PROMPT_COOLDOWN_MS)
                     recentlyPromptedApps.remove(foregroundApp)
                 }
-            } else if (foregroundApp != lastDetectedApp) {
-                lastDetectedApp = foregroundApp
+            } else {
+                // Update last detected app if changed
+                if (foregroundApp != lastDetectedApp) {
+                    lastDetectedApp = foregroundApp
+                }
             }
         } catch (e: Exception) {
+            Log.e(TAG, "❌ Error in checkForegroundApp", e)
             e.printStackTrace()
         }
     }
 
     private fun showPrompt(packageName: String) {
         try {
+            Log.d(TAG, "===== showPrompt called for: $packageName =====")
             val pm = applicationContext.packageManager
             val appName = try {
                 val appInfo = pm.getApplicationInfo(packageName, 0)
                 pm.getApplicationLabel(appInfo).toString()
             } catch (e: PackageManager.NameNotFoundException) {
+                Log.e(TAG, "App not found: $packageName", e)
                 packageName
             }
 
-            val intent = Intent(this, IntentionPromptActivity::class.java).apply {
-                putExtra("app_name", appName)
-                putExtra("package_name", packageName)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            Log.d(TAG, "App name: $appName")
+            
+            // Check if we have SYSTEM_ALERT_WINDOW permission
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (!android.provider.Settings.canDrawOverlays(this)) {
+                    Log.e(TAG, "❌ SYSTEM_ALERT_WINDOW permission not granted!")
+                    return
+                }
             }
-            startActivity(intent)
+            
+            // Start OverlayService to show the system overlay
+            val intent = Intent(this, OverlayService::class.java).apply {
+                putExtra(OverlayService.EXTRA_APP_NAME, appName)
+                putExtra(OverlayService.EXTRA_PACKAGE_NAME, packageName)
+            }
+            
+            Log.d(TAG, "Starting OverlayService...")
+            startService(intent)
+            Log.d(TAG, "✅ OverlayService started successfully!")
         } catch (e: Exception) {
+            Log.e(TAG, "❌ Error showing prompt", e)
             e.printStackTrace()
         }
     }

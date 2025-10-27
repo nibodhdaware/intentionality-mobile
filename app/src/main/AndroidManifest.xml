@@ -7,6 +7,7 @@
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -49,9 +50,13 @@
             android:name=".ui.prompt.IntentionPromptActivity"
             android:exported="false"
             android:theme="@style/Theme.Intentionality"
-            android:launchMode="singleTask"
+            android:launchMode="singleInstance"
             android:excludeFromRecents="true"
-            android:taskAffinity="" />
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:taskAffinity=""
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="unspecified" />
 
         <service
             android:name=".service.AppMonitorService"
@@ -62,6 +67,11 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="App usage monitoring" />
         </service>
+
+        <service
+            android:name=".service.OverlayService"
+            android:enabled="true"
+            android:exported="false" />
     </application>
 
 </manifest>
