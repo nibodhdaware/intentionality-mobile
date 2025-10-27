@@ -25,7 +25,7 @@ class AppMonitorService : Service() {
     private lateinit var repository: MonitoredAppRepository
     
     private var lastDetectedApp: String? = null
-    private val recentlyPromptedApps = mutableSetOf<String>()
+    // Removed cooldown system - track every app open
     private var cachedMonitoredApps: List<String> = emptyList()
     private var lastCacheUpdate: Long = 0L
     
@@ -33,7 +33,6 @@ class AppMonitorService : Service() {
         private const val TAG = "AppMonitorService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "app_monitor_channel"
-        private const val PROMPT_COOLDOWN_MS = 30000L // 30 seconds cooldown
         private const val CACHE_REFRESH_INTERVAL_MS = 10000L // Refresh cache every 10 seconds
     }
 
@@ -53,10 +52,10 @@ class AppMonitorService : Service() {
         scope.launch(Dispatchers.IO) {
             while (true) {
                 checkForegroundApp()
-                delay(3000) // Check every 3 seconds (reduced frequency for less resource usage)
+                delay(500) // Check every 500ms for faster detection
             }
         }
-        Log.d(TAG, "Monitoring loop started, checking every 3 seconds")
+        Log.d(TAG, "Monitoring loop started, checking every 500ms")
         return START_STICKY
     }
 
@@ -114,36 +113,29 @@ class AppMonitorService : Service() {
                 lastCacheUpdate = time
             }
             
-            // Query only last 5 seconds instead of 10 for better performance
+            // Query only last 2 seconds for faster detection
             val usageStats = usageStatsManager.queryUsageStats(
                 UsageStatsManager.INTERVAL_DAILY,
-                time - 5000,
+                time - 2000,
                 time
             )
             
             val foregroundApp = usageStats?.maxByOrNull { it.lastTimeUsed }?.packageName
             
-            // Reduce logging in production for better performance
+            // Log only when app actually changes
             if (foregroundApp != lastDetectedApp) {
                 Log.d(TAG, "App changed: $lastDetectedApp -> $foregroundApp")
             }
 
+            // Show prompt whenever a monitored app becomes foreground (including when switching back)
             if (foregroundApp != null && 
                 foregroundApp != packageName && // Ignore our own app
                 cachedMonitoredApps.contains(foregroundApp) &&
-                foregroundApp != lastDetectedApp &&
-                !recentlyPromptedApps.contains(foregroundApp)
+                foregroundApp != lastDetectedApp // Only when it's a new foreground (including coming back)
             ) {
-                Log.d(TAG, "✅ Showing prompt for: $foregroundApp")
+                Log.d(TAG, "✅ Showing prompt for: $foregroundApp (NEW OPEN or SWITCH BACK)")
                 lastDetectedApp = foregroundApp
                 showPrompt(foregroundApp)
-                
-                // Add to cooldown list and remove after cooldown period
-                recentlyPromptedApps.add(foregroundApp)
-                scope.launch {
-                    delay(PROMPT_COOLDOWN_MS)
-                    recentlyPromptedApps.remove(foregroundApp)
-                }
             } else {
                 // Update last detected app if changed
                 if (foregroundApp != lastDetectedApp) {

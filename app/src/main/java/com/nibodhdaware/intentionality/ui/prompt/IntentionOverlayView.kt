@@ -179,68 +179,72 @@ fun IntentionOverlayView(
                         }
                     }
 
-                    // Submit button
-                    Button(
-                        onClick = {
-                            if (reason.isNotBlank() && selectedRating > 0) {
-                                // Save to database
-                                scope.launch {
-                                    try {
-                                        val userId = supabaseRepository.getUserId() ?: "anonymous"
-                                        supabaseRepository.saveAppEntry(
-                                            appName = appName,
-                                            packageName = packageName,
-                                            reason = reason,
-                                            rating = selectedRating,
-                                            userId = userId
-                                        )
-                                        Log.d("IntentionOverlayView", "✅ Entry saved successfully!")
-                                        
-                                        // Call onProceed to launch the app
-                                        onProceed(reason, selectedRating)
-                                    } catch (e: Exception) {
-                                        Log.e("IntentionOverlayView", "❌ Error saving entry", e)
-                                        Toast.makeText(context, "Failed to save entry", Toast.LENGTH_SHORT).show()
+                    // Buttons in a row - Go Back on left, Submit on right
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Go Back button (left side)
+                        OutlinedButton(
+                            onClick = onGoBack,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Color(0xFFE63946) // Red color for cancel action
+                            ),
+                            border = BorderStroke(2.dp, Color(0xFFE63946)),
+                            shape = MaterialTheme.shapes.medium
+                        ) {
+                            Text(
+                                text = "Go Back",
+                                style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        // Submit button (right side)
+                        Button(
+                            onClick = {
+                                if (reason.isNotBlank() && selectedRating > 0) {
+                                    // Save to database
+                                    scope.launch {
+                                        try {
+                                            val userId = supabaseRepository.getUserId() ?: "anonymous"
+                                            supabaseRepository.saveAppEntry(
+                                                appName = appName,
+                                                packageName = packageName,
+                                                reason = reason,
+                                                rating = selectedRating,
+                                                userId = userId
+                                            )
+                                            Log.d("IntentionOverlayView", "✅ Entry saved successfully!")
+                                            
+                                            // Call onProceed to launch the app
+                                            onProceed(reason, selectedRating)
+                                        } catch (e: Exception) {
+                                            Log.e("IntentionOverlayView", "❌ Error saving entry", e)
+                                            Toast.makeText(context, "Failed to save entry", Toast.LENGTH_SHORT).show()
+                                        }
                                     }
                                 }
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-                        ),
-                        enabled = reason.isNotBlank() && selectedRating > 0,
-                        shape = MaterialTheme.shapes.medium
-                    ) {
-                        Text(
-                            text = "Submit",
-                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Go Back button - More prominent
-                    OutlinedButton(
-                        onClick = onGoBack,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = Color(0xFFE63946) // Red color for cancel action
-                        ),
-                        border = BorderStroke(2.dp, Color(0xFFE63946)), // Thicker red border
-                        shape = MaterialTheme.shapes.medium
-                    ) {
-                        Text(
-                            text = "❌ Cancel & Go Back",
-                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
-                            fontWeight = FontWeight.SemiBold
-                        )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                            ),
+                            enabled = reason.isNotBlank() && selectedRating > 0,
+                            shape = MaterialTheme.shapes.medium
+                        ) {
+                            Text(
+                                text = "Submit",
+                                style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }

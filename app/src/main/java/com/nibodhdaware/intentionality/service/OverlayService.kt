@@ -1,5 +1,6 @@
 package com.nibodhdaware.intentionality.service
 
+import android.app.ActivityManager
 import android.app.Service
 import android.app.usage.UsageStatsManager
 import android.content.Context
@@ -47,7 +48,7 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
         private const val TAG = "OverlayService"
         const val EXTRA_APP_NAME = "app_name"
         const val EXTRA_PACKAGE_NAME = "package_name"
-        private const val CHECK_INTERVAL_MS = 1000L // Check every 1 second
+        private const val CHECK_INTERVAL_MS = 500L // Check every 500ms for faster dismissal
     }
 
     override val lifecycle: Lifecycle get() = lifecycleRegistry
@@ -161,11 +162,23 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
     }
 
     private fun goToHomeScreen() {
+        // Go to home screen
         val homeIntent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
         startActivity(homeIntent)
+        
+        // Kill the monitored app if package name is available
+        monitoredPackageName?.let { packageName ->
+            try {
+                val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                activityManager.killBackgroundProcesses(packageName)
+                Log.d(TAG, "Killed app: $packageName")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to kill app: $packageName", e)
+            }
+        }
     }
     
     private fun startMonitoringForegroundApp() {
