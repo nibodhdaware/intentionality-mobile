@@ -20,10 +20,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+private const val TAG = "AppListViewModel"
+
 data class AppInfo(
     val name: String,
     val packageName: String,
-    val icon: android.graphics.drawable.Drawable
+    var icon: android.graphics.drawable.Drawable? = null  // Made nullable and var for lazy loading
 )
 
 data class UserProfile(
@@ -40,6 +42,9 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
         Context.MODE_PRIVATE
     )
     private val supabase = SupabaseClientManager.client
+    
+    // Icon cache to prevent reloading same icons
+    private val iconCache = mutableMapOf<String, android.graphics.drawable.Drawable>()
 
     private val _isMonitoring = MutableStateFlow(
         sharedPrefs.getBoolean("is_monitoring", false)
@@ -63,9 +68,27 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
     val installedApps: StateFlow<List<AppInfo>> = _installedApps.asStateFlow()
     val filteredApps: StateFlow<List<AppInfo>>
     
-    private val batchSize = 25  // Load 25 apps at a time for fast, efficient pagination
-    private var allPackageActivities: List<android.content.pm.ResolveInfo> = emptyList()
-    private var currentIndex = 0
+    // Function to get cached icon or load it
+    suspend fun getAppIcon(packageName: String): android.graphics.drawable.Drawable {
+        // Check cache first
+        iconCache[packageName]?.let { return it }
+        
+        // Load from package manager
+        return withContext(Dispatchers.IO) {
+            try {
+                val pm = getApplication<Application>().packageManager
+                val icon = pm.getApplicationIcon(packageName)
+                iconCache[packageName] = icon
+                icon
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to load icon for $packageName", e)
+                val pm = getApplication<Application>().packageManager
+                val defaultIcon = pm.defaultActivityIcon
+                iconCache[packageName] = defaultIcon
+                defaultIcon
+            }
+        }
+    }
 
     init {
         val monitoredAppDao = AppDatabase.getDatabase(application).monitoredAppDao()
@@ -75,13 +98,24 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
             list.map { it.packageName }
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-        // Get the list of package activities (fast - no sorting or label loading!)
+        // Load all apps immediately but WITHOUT icons - super fast!
         viewModelScope.launch(Dispatchers.IO) {
             val pm = getApplication<Application>().packageManager
             val intent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
-            allPackageActivities = pm.queryIntentActivities(intent, 0)
+            val resolveInfos = pm.queryIntentActivities(intent, 0)
+            
+            // Map to AppInfo with null icons - instant loading!
+            val apps = resolveInfos.map { resolveInfo ->
+                AppInfo(
+                    name = resolveInfo.loadLabel(pm).toString(),
+                    packageName = resolveInfo.activityInfo.packageName,
+                    icon = null  // Icons will be loaded lazily when items become visible
+                )
+            }.sortedBy { it.name.lowercase() }
+            
+            _installedApps.value = apps
             _isInitialized.value = true
-            Log.d("AppListViewModel", "Initialized with ${allPackageActivities.size} apps")
+            Log.d("AppListViewModel", "Initialized with ${apps.size} apps")
         }
         
         filteredApps = combine(installedApps, searchQuery) { apps, query ->
@@ -132,41 +166,6 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
     
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
-    }
-    
-    fun loadNextBatch() {
-        viewModelScope.launch(Dispatchers.IO) {
-            if (_isLoadingApps.value) return@launch
-            if (currentIndex >= allPackageActivities.size) return@launch
-            
-            _isLoadingApps.value = true
-            
-            // Calculate how many apps to load in this batch
-            val endIndex = minOf(currentIndex + batchSize, allPackageActivities.size)
-            val batchActivities = allPackageActivities.subList(currentIndex, endIndex)
-            
-            // Load app info (icons, labels) only for this batch
-            val pm = getApplication<Application>().packageManager
-            val newApps = batchActivities.map { resolveInfo ->
-                AppInfo(
-                    name = resolveInfo.loadLabel(pm).toString(),
-                    packageName = resolveInfo.activityInfo.packageName,
-                    icon = resolveInfo.loadIcon(pm)
-                )
-            }.sortedBy { it.name.lowercase() } // Sort this batch alphabetically
-            
-            // Add to the displayed list (maintaining overall sort order)
-            val currentList = _installedApps.value
-            _installedApps.value = (currentList + newApps).sortedBy { it.name.lowercase() }
-            currentIndex = endIndex
-            
-            Log.d("AppListViewModel", "Loaded batch: $currentIndex / ${allPackageActivities.size} apps")
-            _isLoadingApps.value = false
-        }
-    }
-    
-    fun hasMoreApps(): Boolean {
-        return currentIndex < allPackageActivities.size
     }
 
     fun onAppChecked(packageName: String, isChecked: Boolean) {

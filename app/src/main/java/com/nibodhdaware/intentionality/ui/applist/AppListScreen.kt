@@ -44,6 +44,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,43 +59,13 @@ fun AppListScreen(modifier: Modifier = Modifier, viewModel: AppListViewModel = v
     val isInitialized by viewModel.isInitialized.collectAsState()
     var showPermissionDialog by remember { mutableStateOf(false) }
     
+    // Use derivedStateOf to prevent unnecessary recompositions
+    val monitoredAppSet = remember(monitoredApps) { monitoredApps.toSet() }
+    
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     
-    // Auto-load initial apps (fast batch loading)
-    LaunchedEffect(isInitialized) {
-        if (!isInitialized) return@LaunchedEffect
-        
-        // Load 50 apps initially (2 batches of 25) - fills screen + buffer for smooth scrolling
-        repeat(2) {
-            if (viewModel.hasMoreApps() && searchQuery.isBlank()) {
-                viewModel.loadNextBatch()
-                // Wait for batch to complete before next
-                while (isLoadingApps) {
-                    kotlinx.coroutines.delay(10) // Fast polling
-                }
-            }
-        }
-    }
-    
-    // Detect when user scrolls near bottom and load more (aggressive prefetching)
-    LaunchedEffect(listState) {
-        snapshotFlow {
-            val layoutInfo = listState.layoutInfo
-            val visibleItems = layoutInfo.visibleItemsInfo
-            if (visibleItems.isEmpty()) return@snapshotFlow false
-            
-            val lastVisibleIndex = visibleItems.last().index
-            val totalItems = layoutInfo.totalItemsCount
-            
-            // Trigger loading when we're 10 items away from the end (aggressive prefetch)
-            lastVisibleIndex >= totalItems - 10
-        }.collect { shouldLoadMore ->
-            if (shouldLoadMore && !isLoadingApps && viewModel.hasMoreApps() && searchQuery.isBlank()) {
-                viewModel.loadNextBatch()
-            }
-        }
-    }
+    // No more auto-loading needed - all apps load instantly!
     
     // Calculate scroll-based alpha for graph (fades out as you scroll)
     val scrollOffset = remember { derivedStateOf { listState.firstVisibleItemScrollOffset } }
@@ -239,20 +210,15 @@ fun AppListScreen(modifier: Modifier = Modifier, viewModel: AppListViewModel = v
                         items = monitoredAppInfos,
                         key = { "monitored_${it.packageName}" }
                     ) { appInfo ->
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn(animationSpec = tween(300)) +
-                                    scaleIn(animationSpec = tween(300), initialScale = 0.8f) +
-                                    slideInVertically(animationSpec = tween(300), initialOffsetY = { -20 })
-                        ) {
-                            AppListItem(
-                                appInfo = appInfo,
-                                isChecked = true,
-                                onCheckedChange = {
-                                    viewModel.onAppChecked(appInfo.packageName, false)
-                                }
-                            )
-                        }
+                        // Removed AnimatedVisibility for better scroll performance
+                        AppListItem(
+                            appInfo = appInfo,
+                            isChecked = true,
+                            onCheckedChange = {
+                                viewModel.onAppChecked(appInfo.packageName, false)
+                            },
+                            viewModel = viewModel
+                        )
                     }
                     
                     // Divider
@@ -340,53 +306,18 @@ fun AppListScreen(modifier: Modifier = Modifier, viewModel: AppListViewModel = v
                         items = filteredApps,
                         key = { it.packageName }
                     ) { appInfo ->
-                        // Fade in animation for each app item
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn(animationSpec = tween(300)) + 
-                                    slideInHorizontally(
-                                        animationSpec = tween(300),
-                                        initialOffsetX = { -100 } // Slide in from left
-                                    )
-                        ) {
-                            AppListItem(
-                                appInfo = appInfo,
-                                isChecked = monitoredApps.contains(appInfo.packageName),
-                                onCheckedChange = {
-                                    viewModel.onAppChecked(appInfo.packageName, !monitoredApps.contains(appInfo.packageName))
-                                }
-                            )
-                        }
+                        // Removed AnimatedVisibility - it causes scroll lag
+                        AppListItem(
+                            appInfo = appInfo,
+                            isChecked = monitoredApps.contains(appInfo.packageName),
+                            onCheckedChange = {
+                                viewModel.onAppChecked(appInfo.packageName, !monitoredApps.contains(appInfo.packageName))
+                            },
+                            viewModel = viewModel
+                        )
                     }
                     
-                    // Loading indicator at bottom when loading more apps
-                    if (isLoadingApps && searchQuery.isBlank()) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(24.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        text = "Loading apps...",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    // Loading indicator removed - no longer needed with instant loading
                 }
             }
         }
@@ -455,12 +386,25 @@ fun AppListScreen(modifier: Modifier = Modifier, viewModel: AppListViewModel = v
 }
 
 @Composable
-fun AppListItem(appInfo: AppInfo, isChecked: Boolean, onCheckedChange: () -> Unit) {
-    // Memoize the drawable painter to avoid recreating on recomposition
-    val iconPainter = rememberDrawablePainter(drawable = appInfo.icon)
+fun AppListItem(
+    appInfo: AppInfo, 
+    isChecked: Boolean, 
+    onCheckedChange: () -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: AppListViewModel = viewModel()
+) {
+    // Load icon from cache/ViewModel - single source of truth
+    var loadedIcon by remember(appInfo.packageName) { 
+        mutableStateOf<android.graphics.drawable.Drawable?>(null) 
+    }
+    
+    // Load icon ONCE when item is first composed
+    LaunchedEffect(appInfo.packageName) {
+        loadedIcon = viewModel.getAppIcon(appInfo.packageName)
+    }
     
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp),
         color = if (isChecked) {
@@ -475,13 +419,25 @@ fun AppListItem(appInfo: AppInfo, isChecked: Boolean, onCheckedChange: () -> Uni
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(12.dp)
         ) {
-            Image(
-                painter = iconPainter,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
-            )
+            // Show icon with simple placeholder - no spinner to reduce recompositions
+            if (loadedIcon != null) {
+                Image(
+                    painter = rememberDrawablePainter(drawable = loadedIcon),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                )
+            } else {
+                // Static placeholder - no animation
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                )
+            }
+            
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -502,7 +458,10 @@ fun AppListItem(appInfo: AppInfo, isChecked: Boolean, onCheckedChange: () -> Uni
             }
             Checkbox(
                 checked = isChecked,
-                onCheckedChange = { onCheckedChange() },
+                onCheckedChange = { 
+                    android.util.Log.d("AppListItem", "Checkbox clicked for ${appInfo.packageName}")
+                    onCheckedChange() 
+                },
                 colors = CheckboxDefaults.colors(
                     checkedColor = MaterialTheme.colorScheme.primary,
                     uncheckedColor = MaterialTheme.colorScheme.outline
