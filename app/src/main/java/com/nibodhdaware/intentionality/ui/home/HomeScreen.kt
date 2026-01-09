@@ -34,6 +34,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
 import com.nibodhdaware.intentionality.database.IntentionLog
 import com.nibodhdaware.intentionality.ui.applist.AppListViewModel
+import com.nibodhdaware.intentionality.ui.onboarding.FeatureDiscoveryOverlay
+import com.nibodhdaware.intentionality.ui.onboarding.FeatureHighlight
+import com.nibodhdaware.intentionality.ui.onboarding.HighlightCoordinatesState
+import com.nibodhdaware.intentionality.ui.onboarding.trackHighlight
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -44,7 +48,9 @@ fun HomeScreen(
     onNavigateToProfile: (() -> Unit)? = null,
     onNavigateToAppConfig: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
-    viewModel: AppListViewModel = viewModel()
+    viewModel: AppListViewModel = viewModel(),
+    showFeatureDiscovery: Boolean = false,
+    onFeatureDiscoveryComplete: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val monitoredApps by viewModel.monitoredApps.collectAsState()
@@ -53,6 +59,31 @@ fun HomeScreen(
     var showUsagePermissionDialog by remember { mutableStateOf(false) }
     var showOverlayPermissionDialog by remember { mutableStateOf(false) }
     var isEditMode by remember { mutableStateOf(false) }
+    
+    // Feature discovery state
+    val highlightState = remember { HighlightCoordinatesState() }
+    var currentHighlight by remember { 
+        mutableStateOf(if (showFeatureDiscovery) FeatureHighlight.SETTINGS_BUTTON else FeatureHighlight.COMPLETE) 
+    }
+    
+    // Update highlight when showFeatureDiscovery changes
+    LaunchedEffect(showFeatureDiscovery) {
+        if (showFeatureDiscovery) {
+            currentHighlight = FeatureHighlight.SETTINGS_BUTTON
+        }
+    }
+    
+    fun advanceHighlight() {
+        currentHighlight = when (currentHighlight) {
+            FeatureHighlight.SETTINGS_BUTTON -> FeatureHighlight.ADD_APPS_FAB
+            FeatureHighlight.ADD_APPS_FAB -> FeatureHighlight.START_MONITORING
+            FeatureHighlight.START_MONITORING -> FeatureHighlight.COMPLETE
+            FeatureHighlight.COMPLETE -> FeatureHighlight.COMPLETE
+        }
+        if (currentHighlight == FeatureHighlight.COMPLETE) {
+            onFeatureDiscoveryComplete()
+        }
+    }
     
     // Filter to show only installed apps
     val installedApps = remember(monitoredApps) {
@@ -100,7 +131,10 @@ fun HomeScreen(
                 )
                 },
                 actions = {
-                    IconButton(onClick = { onNavigateToProfile?.invoke() }) {
+                    IconButton(
+                        onClick = { onNavigateToProfile?.invoke() },
+                        modifier = Modifier.trackHighlight(highlightState, FeatureHighlight.SETTINGS_BUTTON)
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Settings,
                             contentDescription = "Settings"
@@ -113,7 +147,8 @@ fun HomeScreen(
             ExtendedFloatingActionButton(
                 onClick = { onNavigateToAddApps() },
                 icon = { Icon(Icons.Default.Add, contentDescription = "Add") },
-                text = { Text("Add Apps") }
+                text = { Text("Add Apps") },
+                modifier = Modifier.trackHighlight(highlightState, FeatureHighlight.ADD_APPS_FAB)
             )
         }
     ) { paddingValues ->
@@ -176,7 +211,8 @@ fun HomeScreen(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(48.dp),
+                                .height(48.dp)
+                                .trackHighlight(highlightState, FeatureHighlight.START_MONITORING),
                             colors = if (isMonitoring) {
                                 ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.error
@@ -328,6 +364,19 @@ fun HomeScreen(
                 TextButton(onClick = { showOverlayPermissionDialog = false }) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+    
+    // Feature Discovery Overlay
+    if (showFeatureDiscovery && currentHighlight != FeatureHighlight.COMPLETE) {
+        FeatureDiscoveryOverlay(
+            currentHighlight = currentHighlight,
+            highlightBounds = highlightState.getBounds(currentHighlight),
+            onNext = { advanceHighlight() },
+            onSkip = {
+                currentHighlight = FeatureHighlight.COMPLETE
+                onFeatureDiscoveryComplete()
             }
         )
     }

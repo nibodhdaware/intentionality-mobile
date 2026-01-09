@@ -5,9 +5,21 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import com.nibodhdaware.intentionality.ui.main.MainScreen
+import com.nibodhdaware.intentionality.ui.onboarding.OnboardingPreferences
+import com.nibodhdaware.intentionality.ui.onboarding.OnboardingScreen
+import com.nibodhdaware.intentionality.ui.onboarding.SplashScreen
 import com.nibodhdaware.intentionality.ui.theme.IntentionalityTheme
+import kotlinx.coroutines.launch
+
+enum class AppScreen {
+    SPLASH,
+    ONBOARDING,
+    MAIN
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -15,12 +27,75 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             IntentionalityTheme(darkTheme = true) {
-                // Go directly to MainScreen - no login, fully offline
-                MainScreen(
-                    onLogout = { /* No-op, no login/logout */ },
-                    modifier = Modifier.fillMaxSize()
-                )
+                AppNavigator()
             }
+        }
+    }
+}
+
+@Composable
+fun AppNavigator() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val onboardingPreferences = remember { OnboardingPreferences(context) }
+    
+    var currentScreen by remember { mutableStateOf(AppScreen.SPLASH) }
+    var hasCheckedOnboarding by remember { mutableStateOf(false) }
+    var showFeatureDiscovery by remember { mutableStateOf(false) }
+    
+    // Check if onboarding is completed
+    LaunchedEffect(Unit) {
+        onboardingPreferences.hasCompletedOnboarding.collect { completed ->
+            if (!hasCheckedOnboarding) {
+                hasCheckedOnboarding = true
+                // Will be used after splash
+            }
+        }
+    }
+    
+    val hasCompletedOnboarding by onboardingPreferences.hasCompletedOnboarding.collectAsState(initial = null)
+    val hasCompletedFeatureDiscovery by onboardingPreferences.hasCompletedFeatureDiscovery.collectAsState(initial = true)
+    
+    when (currentScreen) {
+        AppScreen.SPLASH -> {
+            SplashScreen(
+                onSplashComplete = {
+                    currentScreen = if (hasCompletedOnboarding == true) {
+                        AppScreen.MAIN
+                    } else {
+                        AppScreen.ONBOARDING
+                    }
+                }
+            )
+        }
+        
+        AppScreen.ONBOARDING -> {
+            OnboardingScreen(
+                onOnboardingComplete = {
+                    scope.launch {
+                        onboardingPreferences.setOnboardingCompleted()
+                    }
+                    showFeatureDiscovery = true
+                    currentScreen = AppScreen.MAIN
+                }
+            )
+        }
+        
+        AppScreen.MAIN -> {
+            // Show feature discovery if coming from onboarding and not yet completed
+            val shouldShowDiscovery = showFeatureDiscovery || (hasCompletedFeatureDiscovery == false)
+            
+            MainScreen(
+                onLogout = { /* No-op, no login/logout */ },
+                modifier = Modifier.fillMaxSize(),
+                showFeatureDiscovery = shouldShowDiscovery,
+                onFeatureDiscoveryComplete = {
+                    showFeatureDiscovery = false
+                    scope.launch {
+                        onboardingPreferences.setFeatureDiscoveryCompleted()
+                    }
+                }
+            )
         }
     }
 }

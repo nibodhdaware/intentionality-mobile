@@ -40,9 +40,15 @@ class AppMonitorService : Service() {
         private const val CACHE_REFRESH_INTERVAL_MS = 10000L // Refresh cache every 10 seconds
         private const val CHECK_INTERVAL_MS = 1000L // Check every 1 second
         
+        // Notification action constants
+        const val ACTION_PAUSE = "com.nibodhdaware.intentionality.ACTION_PAUSE"
+        const val ACTION_RESUME = "com.nibodhdaware.intentionality.ACTION_RESUME"
+        const val ACTION_STOP = "com.nibodhdaware.intentionality.ACTION_STOP"
+        
         // Static flag to track overlay state globally
         var isOverlayVisible = false
         var currentMonitoredApp: String? = null // Track which app is currently being monitored
+        var isPaused = false // Track if monitoring is paused
         
         // Apps where user pressed Go Back - reset their timer to now
         val appsToResetTimer = mutableSetOf<String>()
@@ -61,9 +67,33 @@ class AppMonitorService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "===== Service onStartCommand =====")
+        
+        // Handle notification actions
+        when (intent?.action) {
+            ACTION_PAUSE -> {
+                isPaused = true
+                Log.d(TAG, "Monitoring PAUSED")
+                updateNotification(cachedMonitoredApps.size)
+                return START_STICKY
+            }
+            ACTION_RESUME -> {
+                isPaused = false
+                Log.d(TAG, "Monitoring RESUMED")
+                updateNotification(cachedMonitoredApps.size)
+                return START_STICKY
+            }
+            ACTION_STOP -> {
+                Log.d(TAG, "Monitoring STOPPED")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+        }
+        
         scope.launch(Dispatchers.IO) {
             while (true) {
-                checkForegroundApp()
+                if (!isPaused) {
+                    checkForegroundApp()
+                }
                 delay(CHECK_INTERVAL_MS) // Check every 1 second
             }
         }
@@ -99,10 +129,32 @@ class AppMonitorService : Service() {
             notificationIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        
+        // Create pause action
+        val pauseIntent = Intent(this, AppMonitorService::class.java).apply {
+            action = ACTION_PAUSE
+        }
+        val pausePendingIntent = PendingIntent.getService(
+            this,
+            1,
+            pauseIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        
+        // Create stop action
+        val stopIntent = Intent(this, AppMonitorService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            2,
+            stopIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Intentionality is Monitoring")
-            .setContentText("Tap to view your intentional apps")
+            .setContentTitle("✅ Intentionality Active")
+            .setContentText("Starting monitoring...")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
             .setOngoing(true) // Makes it persistent
@@ -110,6 +162,16 @@ class AppMonitorService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(false) // Prevent swiping away
+            .addAction(
+                android.R.drawable.ic_media_pause,
+                "Pause",
+                pausePendingIntent
+            )
+            .addAction(
+                android.R.drawable.ic_delete,
+                "Stop",
+                stopPendingIntent
+            )
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -259,14 +321,41 @@ class AppMonitorService : Service() {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
 
-            val contentText = if (monitoredAppCount > 0) {
-                "Monitoring $monitoredAppCount ${if (monitoredAppCount == 1) "app" else "apps"}"
-            } else {
-                "No apps monitored yet"
+            val contentTitle = when {
+                isPaused -> "⏸️ Monitoring Paused"
+                else -> "✅ Intentionality Active"
+            }
+            
+            val contentText = when {
+                isPaused -> "Tap Resume to continue monitoring"
+                monitoredAppCount > 0 -> "Watching $monitoredAppCount ${if (monitoredAppCount == 1) "app" else "apps"}"
+                else -> "No apps monitored • Tap to add apps"
             }
 
+            // Create pause/resume action
+            val pauseResumeIntent = Intent(this, AppMonitorService::class.java).apply {
+                action = if (isPaused) ACTION_RESUME else ACTION_PAUSE
+            }
+            val pauseResumePendingIntent = PendingIntent.getService(
+                this,
+                1,
+                pauseResumeIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            
+            // Create stop action
+            val stopIntent = Intent(this, AppMonitorService::class.java).apply {
+                action = ACTION_STOP
+            }
+            val stopPendingIntent = PendingIntent.getService(
+                this,
+                2,
+                stopIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Intentionality is Monitoring")
+                .setContentTitle(contentTitle)
                 .setContentText(contentText)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentIntent(pendingIntent)
@@ -275,6 +364,16 @@ class AppMonitorService : Service() {
                 .setCategory(NotificationCompat.CATEGORY_SERVICE)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(false)
+                .addAction(
+                    if (isPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause,
+                    if (isPaused) "Resume" else "Pause",
+                    pauseResumePendingIntent
+                )
+                .addAction(
+                    android.R.drawable.ic_delete,
+                    "Stop",
+                    stopPendingIntent
+                )
                 .build()
 
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

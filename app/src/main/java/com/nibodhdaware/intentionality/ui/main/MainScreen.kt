@@ -62,7 +62,9 @@ private const val ANIMATION_DURATION = 300
 @Composable
 fun MainScreen(
     onLogout: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showFeatureDiscovery: Boolean = false,
+    onFeatureDiscoveryComplete: () -> Unit = {}
 ) {
     val navController = rememberNavController()
 
@@ -105,7 +107,9 @@ fun MainScreen(
                 },
                 onNavigateToAppConfig = { packageName ->
                     navController.navigate("app_config/$packageName")
-                }
+                },
+                showFeatureDiscovery = showFeatureDiscovery,
+                onFeatureDiscoveryComplete = onFeatureDiscoveryComplete
             )
         }
 
