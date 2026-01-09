@@ -11,9 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.nibodhdaware.intentionality.IntentionalityApp
-import com.nibodhdaware.intentionality.supabase.SupabaseClientManager
-import io.github.jan.supabase.gotrue.auth
-import io.github.jan.supabase.gotrue.providers.builtin.IDToken
+import com.nibodhdaware.intentionality.firebase.FirebaseManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,28 +21,30 @@ data class LoginUiState(
     val isLoading: Boolean = false,
     val isLoggedIn: Boolean = false,
     val error: String? = null,
-    val userId: String? = null
+    val userId: String? = null,
+    val isSignUpMode: Boolean = false
 )
 
 class LoginViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
-    private val supabase = SupabaseClientManager.client
     private val context: Context = IntentionalityApp.instance
 
     init {
         checkIfLoggedIn()
+        Log.d("LoginViewModel", "LoginViewModel initialized")
+        Log.d("LoginViewModel", "Firebase Auth instance: ${FirebaseManager.getCurrentUser()}")
     }
 
     private fun checkIfLoggedIn() {
         viewModelScope.launch {
             try {
-                val session = supabase.auth.currentSessionOrNull()
-                if (session != null) {
+                val user = FirebaseManager.getCurrentUser()
+                if (user != null) {
                     _uiState.value = _uiState.value.copy(
                         isLoggedIn = true,
-                        userId = session.user?.id
+                        userId = user.uid
                     )
                 }
             } catch (e: Exception) {
@@ -57,10 +57,12 @@ class LoginViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(isLoading = true, error = null)
         
         return try {
-            // Get Web Client ID from Google Cloud Console
+            Log.d("LoginViewModel", "Starting Google Sign-In...")
+            
+            // Get Web Client ID from Firebase google-services.json
             val googleIdOption = GetGoogleIdOption.Builder()
                 .setFilterByAuthorizedAccounts(false)
-                .setServerClientId("889785018407-fc3bmn63rntqrnnk25t3778nc670jm3r.apps.googleusercontent.com")
+                .setServerClientId("938266027514-vgh2o1odih2hbqpae8h2qe0kbe1ugk94.apps.googleusercontent.com")
                 .build()
 
             val request = GetCredentialRequest.Builder()
@@ -73,12 +75,20 @@ class LoginViewModel : ViewModel() {
                 context = context,
             )
 
+            Log.d("LoginViewModel", "Credential received, processing...")
             handleSignIn(result)
             Result.success(Unit)
         } catch (e: Exception) {
+            Log.e("LoginViewModel", "Google Sign-In failed", e)
             _uiState.value = _uiState.value.copy(
                 isLoading = false,
-                error = e.message ?: "Google Sign-In failed"
+                error = when {
+                    e.message?.contains("cancel", ignoreCase = true) == true -> 
+                        "Sign-in was cancelled. Please try again."
+                    e.message?.contains("network", ignoreCase = true) == true -> 
+                        "Network error. Please check your connection."
+                    else -> e.message ?: "Google Sign-In failed"
+                }
             )
             Result.failure(e)
         }
@@ -99,28 +109,24 @@ class LoginViewModel : ViewModel() {
                 Log.d("LoginViewModel", "Given Name: ${googleIdTokenCredential.givenName}")
                 Log.d("LoginViewModel", "Family Name: ${googleIdTokenCredential.familyName}")
 
-                // Sign in to Supabase using the ID token
-                supabase.auth.signInWith(IDToken) {
-                    this.idToken = idToken
-                    provider = io.github.jan.supabase.gotrue.providers.Google
-                }
-
-                val session = supabase.auth.currentSessionOrNull()
-                if (session != null) {
-                    // Log Supabase user metadata
-                    Log.d("LoginViewModel", "Supabase User ID: ${session.user?.id}")
-                    Log.d("LoginViewModel", "Supabase Email: ${session.user?.email}")
-                    Log.d("LoginViewModel", "Supabase Metadata: ${session.user?.userMetadata}")
+                // Sign in to Firebase using the ID token
+                val authResult = FirebaseManager.signInWithGoogle(idToken)
+                
+                authResult.onSuccess { user ->
+                    Log.d("LoginViewModel", "Firebase User ID: ${user.uid}")
+                    Log.d("LoginViewModel", "Firebase Email: ${user.email}")
+                    Log.d("LoginViewModel", "Display Name: ${user.displayName}")
                     
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         isLoggedIn = true,
-                        userId = session.user?.id
+                        userId = user.uid
                     )
-                } else {
+                }.onFailure { error ->
+                    Log.e("LoginViewModel", "Firebase sign-in error", error)
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = "Failed to create session"
+                        error = error.message ?: "Firebase authentication failed"
                     )
                 }
             } catch (e: Exception) {
@@ -145,11 +151,118 @@ class LoginViewModel : ViewModel() {
             userId = "dev-user-${System.currentTimeMillis()}"
         )
     }
+    
+    fun toggleSignUpMode() {
+        _uiState.value = _uiState.value.copy(
+            isSignUpMode = !_uiState.value.isSignUpMode,
+            error = null
+        )
+    }
+    
+    suspend fun signInWithEmail(email: String, password: String): Result<Unit> {
+        _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+        
+        return try {
+            val result = FirebaseManager.signInWithEmail(email, password)
+            
+            result.onSuccess { user ->
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    isLoggedIn = true,
+                    userId = user.uid
+                )
+            }.onFailure { error ->
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = when {
+                        error.message?.contains("password", ignoreCase = true) == true ->
+                            "Invalid email or password"
+                        error.message?.contains("user", ignoreCase = true) == true ->
+                            "No account found with this email"
+                        else -> error.message ?: "Sign in failed"
+                    }
+                )
+            }
+            
+            result.map { }
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(
+                isLoading = false,
+                error = e.message ?: "Sign in failed"
+            )
+            Result.failure(e)
+        }
+    }
+    
+    suspend fun signUpWithEmail(email: String, password: String): Result<Unit> {
+        _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+        
+        return try {
+            val result = FirebaseManager.signUpWithEmail(email, password)
+            
+            result.onSuccess { user ->
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    isLoggedIn = true,
+                    userId = user.uid
+                )
+            }.onFailure { error ->
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = when {
+                        error.message?.contains("email-already-in-use", ignoreCase = true) == true ->
+                            "This email is already registered"
+                        error.message?.contains("weak-password", ignoreCase = true) == true ->
+                            "Password should be at least 6 characters"
+                        error.message?.contains("invalid-email", ignoreCase = true) == true ->
+                            "Please enter a valid email"
+                        else -> error.message ?: "Sign up failed"
+                    }
+                )
+            }
+            
+            result.map { }
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(
+                isLoading = false,
+                error = e.message ?: "Sign up failed"
+            )
+            Result.failure(e)
+        }
+    }
+    
+    suspend fun resetPassword(email: String): Result<Unit> {
+        _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+        
+        return try {
+            val result = FirebaseManager.resetPassword(email)
+            
+            result.onSuccess {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = null
+                )
+            }.onFailure { error ->
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = error.message ?: "Password reset failed"
+                )
+            }
+            
+            result
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(
+                isLoading = false,
+                error = e.message ?: "Password reset failed"
+            )
+            Result.failure(e)
+        }
+    }
 
     fun signOut() {
         viewModelScope.launch {
             try {
-                supabase.auth.signOut()
+                FirebaseManager.signOut()
                 _uiState.value = LoginUiState()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(

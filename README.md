@@ -43,13 +43,14 @@ A native Android app built with Kotlin and Jetpack Compose that helps users trac
 ### 5. **Data Storage**
 
 -   All entries saved to Firebase Firestore with:
-    -   `appName`: Display name of the app
-    -   `packageName`: Android package identifier
-    -   `reason`: User's text input
-    -   `rating`: 1-5 intentionality score
-    -   `timestamp`: UTC timestamp
-    -   `userId`: Firebase user ID
-    -   `createdAt`: Server timestamp
+    -   `title`: Display name of the app (matches Chrome extension)
+    -   `description`: User's text input (matches Chrome extension)
+    -   `timestamp`: Human-readable timestamp (matches Chrome extension)
+    -   `userAgent`: Device information (matches Chrome extension)
+    -   `packageName`: Android package identifier (mobile-specific)
+    -   `dumbReason`: Productivity rating category (mobile-specific)
+    -   `sessionDuration`: Time spent in seconds (mobile-specific)
+    -   `url`: App URL scheme (mobile-specific)
 
 ## Tech Stack
 
@@ -88,31 +89,29 @@ See **[FIREBASE_SETUP.md](FIREBASE_SETUP.md)** for detailed instructions on:
 
 #### Firestore Collections
 
-The app uses the following Firestore collections:
+The app uses the following Firestore collections (matching Chrome extension schema):
 
-**`app_entries`**: Stores each app usage entry
+**`users/{userId}/activities`**: Stores each app usage entry
 
 ```javascript
 {
-  "userId": "firebase-user-uid",
-  "appName": "Instagram",
+  "title": "Instagram",                     // App name (matches Chrome extension)
+  "description": "Check messages from friends", // User's reason (matches Chrome extension)
+  "timestamp": "October 30, 2025 at 2:15:30 PM GMT+05:30", // Human-readable (matches Chrome extension)
+  "userAgent": "Android/14 (Pixel 7; Google)", // Device info (matches Chrome extension)
+  // Additional mobile-specific fields
   "packageName": "com.instagram.android",
-  "reason": "Check messages from friends",
-  "rating": 2,
-  "timestamp": "2024-10-23T12:34:56.789Z",
-  "createdAt": ServerTimestamp
+  "dumbReason": "productive",
+  "sessionDuration": 45.0,
+  "url": "app://com.instagram.android"
 }
 ```
 
-**`users`** (optional): Stores user profile information
+**`users/{userId}/settings/blockedSites`** (optional): Stores blocked sites list
 
 ```javascript
 {
-  "userId": "firebase-user-uid",
-  "email": "user@example.com",
-  "displayName": "John Doe",
-  "photoURL": "https://...",
-  "lastUpdated": ServerTimestamp
+  "sites": ["instagram.com", "twitter.com"]
 }
 ```
 
@@ -280,22 +279,30 @@ The app uses a custom Material Design 3 dark theme:
 
 ## Syncing with Chrome Extension
 
-Since this app uses Firebase, you can easily sync data with a Chrome extension on the same Firebase project:
+Since this app uses Firebase with the **same schema as the Chrome extension**, data syncs automatically across platforms:
 
 1. **Shared Authentication**: Users sign in with the same Google account
-2. **Shared Database**: Both platforms access the same Firestore collections
-3. **Cross-Platform Insights**: View app usage from both Android and web
+2. **Shared Database**: Both platforms use `users/{userId}/activities` collection
+3. **Identical Schema**: Same field names (`title`, `description`, `timestamp`, `userAgent`)
+4. **Cross-Platform Insights**: View app usage from both Android and Chrome seamlessly
 
-Example Firestore query in Chrome extension:
+Example Firestore query in Chrome extension (already compatible):
 
 ```javascript
-const entriesRef = firebase.firestore().collection("app_entries");
-const userEntries = await entriesRef
-    .where("userId", "==", currentUser.uid)
+const db = firebase.firestore();
+const userId = firebase.auth().currentUser.uid;
+
+const activitiesRef = db
+    .collection("users")
+    .doc(userId)
+    .collection("activities");
+const userEntries = await activitiesRef
     .orderBy("timestamp", "desc")
     .limit(100)
     .get();
 ```
+
+**Data appears identically in both mobile app and Chrome extension!** 📱💻
 
 ## Future Enhancements
 

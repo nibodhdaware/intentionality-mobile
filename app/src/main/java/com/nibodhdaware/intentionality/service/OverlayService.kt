@@ -2,7 +2,6 @@ package com.nibodhdaware.intentionality.service
 
 import android.app.ActivityManager
 import android.app.Service
-import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
@@ -23,13 +22,13 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.nibodhdaware.intentionality.database.AppDatabase
+import com.nibodhdaware.intentionality.database.IntentionLog
 import com.nibodhdaware.intentionality.ui.prompt.IntentionOverlayView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
@@ -41,14 +40,17 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     
-    private var monitorJob: Job? = null
     private var monitoredPackageName: String? = null
+    
+    // Debouncing and state management
+    private var isOverlayShowing = false
+    private var lastDismissTime = 0L
+    private val DISMISS_DEBOUNCE_MS = 2000L  // Increased from 1000L to prevent glitching
 
     companion object {
         private const val TAG = "OverlayService"
         const val EXTRA_APP_NAME = "app_name"
         const val EXTRA_PACKAGE_NAME = "package_name"
-        private const val CHECK_INTERVAL_MS = 500L // Check every 500ms for faster dismissal
     }
 
     override val lifecycle: Lifecycle get() = lifecycleRegistry
@@ -71,6 +73,13 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
 
         Log.d(TAG, "Showing overlay for app: $appName ($packageName)")
 
+        // Debounce check - prevent rapid recreation
+        val currentTime = System.currentTimeMillis()
+        if (isOverlayShowing && currentTime - lastDismissTime < DISMISS_DEBOUNCE_MS) {
+            Log.d(TAG, "⚠️ Ignoring overlay request - too soon after dismissal (${currentTime - lastDismissTime}ms)")
+            return START_NOT_STICKY
+        }
+
         // Dismiss any existing overlay first
         dismissOverlay()
 
@@ -79,9 +88,6 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
 
         // Show new overlay
         showOverlay(appName, packageName)
-        
-        // Start monitoring if monitored app goes away
-        startMonitoringForegroundApp()
 
         return START_NOT_STICKY
     }
@@ -108,6 +114,8 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
             )
 
             params.gravity = Gravity.CENTER
+            // Prevent keyboard from showing and interfering with overlay
+            params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
 
             // Create ComposeView for the overlay
             overlayView = ComposeView(this).apply {
@@ -121,12 +129,25 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                         packageName = packageName,
                         onProceed = { reason, rating ->
                             Log.d(TAG, "Overlay submitted: reason='$reason', rating=$rating")
+                            // Save to database
+                            saveIntentionLog(packageName, appName, reason, rating)
+                            // Reset flags FIRST before any other action
+                            AppMonitorService.isOverlayVisible = false
+                            AppMonitorService.currentMonitoredApp = null
                             launchApp(packageName)
                             dismissOverlay()
                             stopSelf()
                         },
                         onGoBack = {
                             Log.d(TAG, "Go back pressed")
+                            // Mark this app to reset timer to now (interval restarts)
+                            monitoredPackageName?.let { pkg ->
+                                AppMonitorService.appsToResetTimer.add(pkg)
+                                Log.d(TAG, "Marked $pkg for timer reset")
+                            }
+                            // Reset flags FIRST before any other action
+                            AppMonitorService.isOverlayVisible = false
+                            AppMonitorService.currentMonitoredApp = null
                             goToHomeScreen()
                             dismissOverlay()
                             stopSelf()
@@ -136,12 +157,14 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
             }
 
             windowManager?.addView(overlayView, params)
+            isOverlayShowing = true
             lifecycleRegistry.currentState = Lifecycle.State.RESUMED
             Log.d(TAG, "✅ Overlay displayed successfully!")
 
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error showing overlay", e)
             e.printStackTrace()
+            isOverlayShowing = false
             stopSelf()
         }
     }
@@ -159,6 +182,46 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
         } catch (e: Exception) {
             Log.e(TAG, "Error launching app", e)
         }
+    }
+
+    private fun forceKillAndGoHome() {
+        monitoredPackageName?.let { packageName ->
+            try {
+                // First, force stop the app using ActivityManager
+                val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                
+                // Remove from recent tasks (this also kills the app)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    val appTasks = activityManager.appTasks
+                    for (task in appTasks) {
+                        try {
+                            val taskInfo = task.taskInfo
+                            if (taskInfo.baseActivity?.packageName == packageName ||
+                                taskInfo.origActivity?.packageName == packageName) {
+                                task.finishAndRemoveTask()
+                                Log.d(TAG, "Removed $packageName from recents via appTasks")
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error checking task", e)
+                        }
+                    }
+                }
+                
+                // Also kill background processes as backup
+                activityManager.killBackgroundProcesses(packageName)
+                Log.d(TAG, "Killed background processes for: $packageName")
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to force kill app: $packageName", e)
+            }
+        }
+        
+        // Go to home screen
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(homeIntent)
     }
 
     private fun goToHomeScreen() {
@@ -181,68 +244,59 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
         }
     }
     
-    private fun startMonitoringForegroundApp() {
-        // Cancel any existing monitoring job
-        monitorJob?.cancel()
-        
-        monitorJob = serviceScope.launch(Dispatchers.IO) {
-            while (true) {
-                delay(CHECK_INTERVAL_MS)
-                
-                try {
-                    val foregroundApp = getForegroundApp()
-                    
-                    // If the overlay is showing but the monitored app is no longer in foreground
-                    // AND it's not our own app (which would be the overlay)
-                    if (foregroundApp != null && 
-                        foregroundApp != monitoredPackageName &&
-                        foregroundApp != packageName) {
-                        Log.d(TAG, "Monitored app ($monitoredPackageName) is no longer in foreground. Current: $foregroundApp. Dismissing overlay.")
-                        launch(Dispatchers.Main) {
-                            dismissOverlay()
-                            stopSelf()
-                        }
-                        break
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error checking foreground app", e)
-                }
-            }
-        }
-    }
-    
-    private fun getForegroundApp(): String? {
-        return try {
-            val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-            val time = System.currentTimeMillis()
-            val usageStats = usageStatsManager.queryUsageStats(
-                UsageStatsManager.INTERVAL_DAILY,
-                time - 2000,
-                time
-            )
-            usageStats?.maxByOrNull { it.lastTimeUsed }?.packageName
-        } catch (e: Exception) {
-            Log.e(TAG, "Error getting foreground app", e)
-            null
-        }
-    }
-
     private fun dismissOverlay() {
         try {
-            lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
-            if (overlayView != null && overlayView?.windowToken != null) {
-                windowManager?.removeView(overlayView)
-                Log.d(TAG, "Overlay dismissed")
+            // Reset ALL flags when dismissing
+            AppMonitorService.isOverlayVisible = false
+            AppMonitorService.currentMonitoredApp = null
+            isOverlayShowing = false
+            lastDismissTime = System.currentTimeMillis()
+            
+            // Only change lifecycle state if it's valid
+            if (lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.CREATED)) {
+                lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
+            }
+            
+            if (overlayView != null) {
+                try {
+                    if (overlayView?.isAttachedToWindow == true) {
+                        windowManager?.removeView(overlayView)
+                        Log.d(TAG, "Overlay dismissed at ${lastDismissTime}")
+                    }
+                } catch (e: IllegalArgumentException) {
+                    Log.w(TAG, "View was not attached to window manager")
+                }
             }
             overlayView = null
         } catch (e: Exception) {
             Log.e(TAG, "Error dismissing overlay", e)
         }
     }
+    
+    private fun saveIntentionLog(packageName: String, appName: String, reason: String, rating: Int) {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val db = AppDatabase.getDatabase(this@OverlayService)
+                val log = IntentionLog(
+                    packageName = packageName,
+                    appName = appName,
+                    reason = reason,
+                    dumbnessRating = rating
+                )
+                db.intentionLogDao().insert(log)
+                Log.d(TAG, "Saved intention log: $appName, rating=$rating")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving intention log", e)
+            }
+        }
+    }
 
     override fun onDestroy() {
         Log.d(TAG, "OverlayService destroyed")
-        monitorJob?.cancel()
+        // Reset ALL flags
+        AppMonitorService.isOverlayVisible = false
+        AppMonitorService.currentMonitoredApp = null
+        isOverlayShowing = false
         dismissOverlay()
         serviceScope.cancel()
         store.clear()

@@ -3,385 +3,267 @@ package com.nibodhdaware.intentionality.ui.applist
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppListScreen(modifier: Modifier = Modifier, viewModel: AppListViewModel = viewModel()) {
+fun AppListScreen(
+    onNavigateBack: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    viewModel: AppListViewModel = viewModel()
+) {
     val context = LocalContext.current
     val filteredApps by viewModel.filteredApps.collectAsState()
     val monitoredApps by viewModel.monitoredApps.collectAsState()
-    val isMonitoring by viewModel.isMonitoring.collectAsState()
+    val selectedApps by viewModel.selectedApps.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
-    val userProfile by viewModel.userProfile.collectAsState()
-    val isLoadingApps by viewModel.isLoadingApps.collectAsState()
-    val isInitialized by viewModel.isInitialized.collectAsState()
+    val hasMoreApps by viewModel.hasMoreApps.collectAsState()
     var showPermissionDialog by remember { mutableStateOf(false) }
     
-    // Use derivedStateOf to prevent unnecessary recompositions
-    val monitoredAppSet = remember(monitoredApps) { monitoredApps.toSet() }
-    
+    // List state for pagination
     val listState = rememberLazyListState()
+    
+    // Trigger load more when near end of list
+    LaunchedEffect(listState.firstVisibleItemIndex, filteredApps.size) {
+        val lastVisibleIndex = listState.firstVisibleItemIndex + listState.layoutInfo.visibleItemsInfo.size
+        if (lastVisibleIndex >= filteredApps.size - 5 && hasMoreApps) {
+            viewModel.loadNextPage()
+        }
+    }
+    
+    // Clear selection when entering this screen (we're adding NEW apps)
+    LaunchedEffect(Unit) {
+        viewModel.clearSelection()
+    }
+    
     val coroutineScope = rememberCoroutineScope()
+    val focusRequester = remember { FocusRequester() }
     
-    // No more auto-loading needed - all apps load instantly!
-    
-    // Calculate scroll-based alpha for graph (fades out as you scroll)
-    val scrollOffset = remember { derivedStateOf { listState.firstVisibleItemScrollOffset } }
-    val graphAlpha by animateFloatAsState(
-        targetValue = when {
-            listState.firstVisibleItemIndex > 0 -> 0f
-            scrollOffset.value > 300 -> 0f
-            scrollOffset.value > 0 -> 1f - (scrollOffset.value / 300f)
-            else -> 1f
-        },
-        animationSpec = tween(durationMillis = 200),
-        label = "graphAlpha"
-    )
-    
-    val graphHeight by animateFloatAsState(
-        targetValue = when {
-            listState.firstVisibleItemIndex > 0 -> 0f
-            scrollOffset.value > 300 -> 0f
-            scrollOffset.value > 0 -> 1f - (scrollOffset.value / 300f)
-            else -> 1f
-        },
-        animationSpec = tween(durationMillis = 200),
-        label = "graphHeight"
-    )
+    // Request focus when screen loads
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Top Bar with Full-Width Search
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 4.dp
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-                    // Full-Width Search Bar with rounded rectangle corners
+    fun hasUsageStatsPermission(): Boolean {
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                context.packageName
+            )
+        } else {
+            appOps.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                context.packageName
+            )
+        }
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            // Always show search TopAppBar
+            TopAppBar(
+                title = {
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { viewModel.updateSearchQuery(it) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(56.dp),
+                            .focusRequester(focusRequester),
                         placeholder = { Text("Search apps...") },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.Search,
-                                contentDescription = "Search",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        },
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp), // Rounded rectangle instead of fully rounded
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                        )
-                    )
-                }
-            }
-            
-            // Scrollable Content
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 100.dp)
-            ) {
-                // Graph Area (with smooth fade)
-                item {
-                    if (graphHeight > 0.01f) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height((200 * graphHeight).dp)
-                                .alpha(graphAlpha)
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = listOf(
-                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                                            MaterialTheme.colorScheme.background
-                                        )
-                                    )
-                                )
-                                .padding(16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(48.dp),
-                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "Usage Graph",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "Coming soon...",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.3f)
-                                )
-                            }
-                        }
-                    }
-                }
-                
-                // Monitored Apps Section (at the top)
-                if (monitoredApps.isNotEmpty()) {
-                    item {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                                .animateContentSize()
-                        ) {
-                            Text(
-                                text = "📌 Monitored Apps (${monitoredApps.size})",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-                            )
-                        }
-                    }
-                    
-                    // Show monitored apps
-                    val monitoredAppInfos = filteredApps.filter { monitoredApps.contains(it.packageName) }
-                    items(
-                        items = monitoredAppInfos,
-                        key = { "monitored_${it.packageName}" }
-                    ) { appInfo ->
-                        // Removed AnimatedVisibility for better scroll performance
-                        AppListItem(
-                            appInfo = appInfo,
-                            isChecked = true,
-                            onCheckedChange = {
-                                viewModel.onAppChecked(appInfo.packageName, false)
-                            },
-                            viewModel = viewModel
-                        )
-                    }
-                    
-                    // Divider
-                    item {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 16.dp, horizontal = 16.dp),
-                            thickness = 1.dp,
-                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                        )
-                    }
-                }
-                
-                // Section Header for All Apps
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = if (monitoredApps.isEmpty()) "Select Apps to Monitor" else "All Apps",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-                            Text(
-                                text = if (isMonitoring) {
-                                    "Monitoring ${monitoredApps.size} apps"
-                                } else if (monitoredApps.isEmpty()) {
-                                    "No apps selected yet"
-                                } else {
-                                    "${monitoredApps.size} apps selected"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (isMonitoring) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
-                                }
-                            )
-                        }
-                    }
-                }
-                
-                // App List
-                if (filteredApps.isEmpty()) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
+                        trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
-                                Text(
-                                    text = "No apps found",
-                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
-                                )
-                            } else if (!isInitialized) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CircularProgressIndicator(modifier = Modifier.size(32.dp))
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = "Initializing...",
-                                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                                    )
-                                }
-                            } else if (isLoadingApps) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CircularProgressIndicator(modifier = Modifier.size(32.dp))
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = "Loading apps...",
-                                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                                    )
+                                IconButton(onClick = { viewModel.updateSearchQuery("") }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear")
                                 }
                             }
                         }
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = { 
+                        onNavigateBack?.invoke()
+                    }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                } else {
-                    items(
-                        items = filteredApps,
-                        key = { it.packageName }
-                    ) { appInfo ->
-                        // Removed AnimatedVisibility - it causes scroll lag
-                        AppListItem(
-                            appInfo = appInfo,
-                            isChecked = monitoredApps.contains(appInfo.packageName),
-                            onCheckedChange = {
-                                viewModel.onAppChecked(appInfo.packageName, !monitoredApps.contains(appInfo.packageName))
-                            },
-                            viewModel = viewModel
-                        )
-                    }
-                    
-                    // Loading indicator removed - no longer needed with instant loading
                 }
-            }
-        }
-
-        // Monitor Button at Bottom
-        Surface(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth(),
-            shadowElevation = 16.dp,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
-        ) {
-            Button(
-                onClick = {
-                    if (isMonitoring) {
-                        viewModel.stopMonitoring()
-                    } else {
-                        if (monitoredApps.isEmpty()) {
+            )
+        },
+        bottomBar = {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding(),
+                shadowElevation = 8.dp,
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Button(
+                    onClick = {
+                        if (selectedApps.isEmpty()) {
                             android.widget.Toast.makeText(
                                 context,
                                 "Please select at least one app to monitor",
                                 android.widget.Toast.LENGTH_SHORT
                             ).show()
-                        } else if (checkPermissions(context)) {
-                            viewModel.startMonitoring()
-                            // Scroll to top to show the graph
-                            coroutineScope.launch {
-                                listState.animateScrollToItem(0)
-                            }
                         } else {
-                            showPermissionDialog = true
+                            coroutineScope.launch {
+                                viewModel.addSelectedAppsToMonitored()
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "${selectedApps.size} app${if (selectedApps.size == 1) "" else "s"} added to monitoring",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                                onNavigateBack?.invoke()
+                            }
                         }
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-                    .height(56.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isMonitoring) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    }
-                ),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Text(
-                    text = if (isMonitoring) "Stop Monitoring" else "Start Monitoring",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .height(48.dp),
+                    enabled = selectedApps.isNotEmpty()
+                ) {
+                    Text(
+                        text = if (selectedApps.isEmpty()) {
+                            "Select Apps to Monitor"
+                        } else {
+                            "Add ${selectedApps.size} App${if (selectedApps.size == 1) "" else "s"}"
+                        },
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
-
-        if (showPermissionDialog) {
-            PermissionDialog(
-                onDismiss = { showPermissionDialog = false },
-                onOpenSettings = {
-                    requestPermissions(context)
-                    showPermissionDialog = false
+    ) { paddingValues ->
+        if (searchQuery.isBlank()) {
+            // Show helpful message when no search query
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.outline
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Search for an app",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Type the name of the app you want to monitor",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.outline,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
                 }
-            )
+            }
+        } else {
+            // Show filtered apps when searching
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                items(
+                    items = filteredApps,
+                    key = { it.packageName }
+                ) { appInfo ->
+                    AppListItem(
+                        appInfo = appInfo,
+                        isChecked = selectedApps.contains(appInfo.packageName),
+                        onCheckedChange = {
+                            viewModel.toggleAppSelection(appInfo.packageName)
+                        }
+                    )
+                }
+                
+                // Show "no results" message
+                if (filteredApps.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No apps found for \"$searchQuery\"",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    if (showPermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { showPermissionDialog = false },
+            title = { Text("Usage Access Permission Required") },
+            text = { 
+                Text("To monitor apps, you need to grant usage access permission. This allows the app to detect when you open monitored apps.") 
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showPermissionDialog = false
+                        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                        context.startActivity(intent)
+                    }
+                ) {
+                    Text("Open Settings")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermissionDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
@@ -390,148 +272,52 @@ fun AppListItem(
     appInfo: AppInfo, 
     isChecked: Boolean, 
     onCheckedChange: () -> Unit,
-    modifier: Modifier = Modifier,
-    viewModel: AppListViewModel = viewModel()
+    modifier: Modifier = Modifier
 ) {
-    // Load icon from cache/ViewModel - single source of truth
-    var loadedIcon by remember(appInfo.packageName) { 
-        mutableStateOf<android.graphics.drawable.Drawable?>(null) 
+    val context = LocalContext.current
+    
+    // Cache the icon using remember with the package name as key
+    val icon = remember(appInfo.packageName) {
+        try {
+            context.packageManager.getApplicationIcon(appInfo.packageName)
+        } catch (e: Exception) {
+            context.packageManager.defaultActivityIcon
+        }
     }
     
-    // Load icon ONCE when item is first composed
-    LaunchedEffect(appInfo.packageName) {
-        loadedIcon = viewModel.getAppIcon(appInfo.packageName)
-    }
+    // Use stable callback to prevent recomposition
+    val stableOnCheckedChange = remember(appInfo.packageName) { { onCheckedChange() } }
     
-    Surface(
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        color = if (isChecked) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-        } else {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
-        },
-        shape = RoundedCornerShape(12.dp),
-        tonalElevation = if (isChecked) 2.dp else 0.dp
+            .padding(horizontal = 16.dp, vertical = 6.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(12.dp)
-        ) {
-            // Show icon with simple placeholder - no spinner to reduce recompositions
-            if (loadedIcon != null) {
-                Image(
-                    painter = rememberDrawablePainter(drawable = loadedIcon),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                )
-            } else {
-                // Static placeholder - no animation
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                )
-            }
-            
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 12.dp)
-            ) {
-                Text(
-                    text = appInfo.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = appInfo.packageName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    maxLines = 1
-                )
-            }
-            Checkbox(
-                checked = isChecked,
-                onCheckedChange = { 
-                    android.util.Log.d("AppListItem", "Checkbox clicked for ${appInfo.packageName}")
-                    onCheckedChange() 
-                },
-                colors = CheckboxDefaults.colors(
-                    checkedColor = MaterialTheme.colorScheme.primary,
-                    uncheckedColor = MaterialTheme.colorScheme.outline
-                )
-            )
-        }
+        // App icon - directly draw without box wrapping for better performance
+        Image(
+            painter = rememberDrawablePainter(drawable = icon),
+            contentDescription = null,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(8.dp))
+        )
+        
+        // App name
+        Text(
+            text = appInfo.name,
+            style = MaterialTheme.typography.bodyLarge,
+            maxLines = 1,
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 12.dp)
+        )
+        
+        // Checkbox
+        Checkbox(
+            checked = isChecked,
+            onCheckedChange = { stableOnCheckedChange() }
+        )
     }
 }
 
-@Composable
-fun PermissionDialog(onDismiss: () -> Unit, onOpenSettings: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Permissions Required") },
-        text = {
-            Text(
-                "Intentionality needs two permissions:\n\n" +
-                        "1. Usage Access - to detect when monitored apps are opened\n" +
-                        "2. Display over other apps - to show the intention prompt\n\n" +
-                        "This allows the app to show you the intention prompt when you launch a monitored app.\n\n" +
-                        "Your privacy is important - we only monitor apps you select and all data stays on your device and Supabase."
-            )
-        },
-        confirmButton = {
-            Button(onClick = onOpenSettings) {
-                Text("Open Settings")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-private fun checkPermissions(context: Context): Boolean {
-    return hasUsageStatsPermission(context) && hasOverlayPermission(context)
-}
-
-private fun hasUsageStatsPermission(context: Context): Boolean {
-    val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-    val mode = appOps.unsafeCheckOpNoThrow(
-        AppOpsManager.OPSTR_GET_USAGE_STATS,
-        android.os.Process.myUid(),
-        context.packageName
-    )
-    return mode == AppOpsManager.MODE_ALLOWED
-}
-
-private fun hasOverlayPermission(context: Context): Boolean {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-        Settings.canDrawOverlays(context)
-    } else {
-        true // Permission not required on older versions
-    }
-}
-
-private fun requestPermissions(context: Context) {
-    // First check which permission is missing and request it
-    if (!hasUsageStatsPermission(context)) {
-        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-        context.startActivity(intent)
-    } else if (!hasOverlayPermission(context)) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:${context.packageName}")
-            )
-            context.startActivity(intent)
-        }
-    }
-}

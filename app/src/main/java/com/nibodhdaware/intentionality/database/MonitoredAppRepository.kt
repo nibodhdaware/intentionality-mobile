@@ -9,8 +9,16 @@ class MonitoredAppRepository(private val monitoredAppDao: MonitoredAppDao) {
     suspend fun insert(monitoredApp: MonitoredApp) {
         monitoredAppDao.insert(monitoredApp)
     }
+    
+    suspend fun update(monitoredApp: MonitoredApp) {
+        monitoredAppDao.update(monitoredApp)
+    }
 
     suspend fun delete(monitoredApp: MonitoredApp) {
         monitoredAppDao.delete(monitoredApp)
+    }
+    
+    suspend fun getByPackageName(packageName: String): MonitoredApp? {
+        return monitoredAppDao.getByPackageName(packageName)
     }
 }

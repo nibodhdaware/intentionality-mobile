@@ -5,12 +5,12 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import com.nibodhdaware.intentionality.ui.applist.AppListScreen
 import com.nibodhdaware.intentionality.ui.auth.LoginScreen
+import com.nibodhdaware.intentionality.ui.main.MainScreen
 
 sealed class Screen(val route: String) {
     object Login : Screen("login")
-    object AppList : Screen("app_list")
+    object Main : Screen("main")
 }
 
 @Composable
@@ -27,15 +27,21 @@ fun NavGraph(
         composable(Screen.Login.route) {
             LoginScreen(
                 onLoginSuccess = {
-                    navController.navigate(Screen.AppList.route) {
+                    navController.navigate(Screen.Main.route) {
                         popUpTo(Screen.Login.route) { inclusive = true }
                     }
                 }
             )
         }
 
-        composable(Screen.AppList.route) {
-            AppListScreen()
+        composable(Screen.Main.route) {
+            MainScreen(
+                onLogout = {
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(Screen.Main.route) { inclusive = true }
+                    }
+                }
+            )
         }
     }
 }

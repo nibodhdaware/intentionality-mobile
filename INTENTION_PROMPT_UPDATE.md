@@ -299,3 +299,6 @@ Potential improvements for later:
 Install the app and try opening a monitored app to see the updated design in action.
 
 
+
+
+

@@ -4,6 +4,9 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     id("com.google.devtools.ksp") version "2.0.21-1.0.28"
     kotlin("plugin.serialization") version "2.0.21"
+    
+    // Add the Google services Gradle plugin
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -65,15 +68,13 @@ dependencies {
     ksp("androidx.room:room-compiler:$room_version")
     implementation("androidx.room:room-ktx:$room_version")
 
-    // Supabase
-    implementation(platform("io.github.jan-tennert.supabase:bom:2.0.0"))
-    implementation("io.github.jan-tennert.supabase:postgrest-kt")
-    implementation("io.github.jan-tennert.supabase:gotrue-kt")
+    // Firebase BoM (Bill of Materials)
+    implementation(platform("com.google.firebase:firebase-bom:34.4.0"))
     
-    // Ktor for Supabase
-    implementation("io.ktor:ktor-client-android:2.3.5")
-    implementation("io.ktor:ktor-client-core:2.3.5")
-    implementation("io.ktor:ktor-utils:2.3.5")
+    // Firebase products (no version needed when using BoM)
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
     
     // Kotlinx Serialization
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
@@ -93,6 +94,11 @@ dependencies {
     
     // DataStore for preferences
     implementation("androidx.datastore:datastore-preferences:1.0.0")
+    
+    // Android Iconics for brand/social media icons
+    implementation("com.mikepenz:iconics-core:5.4.0")
+    implementation("com.mikepenz:iconics-compose:5.4.0")
+    implementation("com.mikepenz:fontawesome-typeface:5.9.0.2-kotlin@aar")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

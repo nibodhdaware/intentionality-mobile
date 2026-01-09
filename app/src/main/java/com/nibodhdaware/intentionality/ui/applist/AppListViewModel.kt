@@ -4,47 +4,40 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.ResolveInfo
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nibodhdaware.intentionality.database.AppDatabase
+import com.nibodhdaware.intentionality.database.IntentionLog
 import com.nibodhdaware.intentionality.database.MonitoredApp
 import com.nibodhdaware.intentionality.database.MonitoredAppRepository
 import com.nibodhdaware.intentionality.service.AppMonitorService
-import com.nibodhdaware.intentionality.supabase.SupabaseClientManager
-import io.github.jan.supabase.gotrue.auth
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.FlowPreview
+import java.util.Calendar
 
 private const val TAG = "AppListViewModel"
 
 data class AppInfo(
     val name: String,
-    val packageName: String,
-    var icon: android.graphics.drawable.Drawable? = null  // Made nullable and var for lazy loading
+    val packageName: String
 )
 
-data class UserProfile(
-    val name: String?,
-    val email: String?,
-    val photoUrl: String?
-)
-
+@OptIn(FlowPreview::class)
 class AppListViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: MonitoredAppRepository
+    private val database: AppDatabase = AppDatabase.getDatabase(application)
     private val sharedPrefs: SharedPreferences = application.getSharedPreferences(
         "app_prefs",
         Context.MODE_PRIVATE
     )
-    private val supabase = SupabaseClientManager.client
-    
-    // Icon cache to prevent reloading same icons
-    private val iconCache = mutableMapOf<String, android.graphics.drawable.Drawable>()
 
     private val _isMonitoring = MutableStateFlow(
         sharedPrefs.getBoolean("is_monitoring", false)
@@ -54,150 +47,213 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
     
-    private val _userProfile = MutableStateFlow<UserProfile?>(null)
-    val userProfile: StateFlow<UserProfile?> = _userProfile.asStateFlow()
-    
-    private val _isLoadingApps = MutableStateFlow(false)
-    val isLoadingApps: StateFlow<Boolean> = _isLoadingApps.asStateFlow()
+    // Temporary selection state for app selection screen
+    private val _selectedApps = MutableStateFlow<Set<String>>(emptySet())
+    val selectedApps: StateFlow<Set<String>> = _selectedApps.asStateFlow()
     
     private val _isInitialized = MutableStateFlow(false)
     val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
+    
+    // Not needed anymore but kept for compatibility
+    private val _hasMoreApps = MutableStateFlow(false)
+    val hasMoreApps: StateFlow<Boolean> = _hasMoreApps.asStateFlow()
 
-    val monitoredApps: StateFlow<List<String>>
-    private val _installedApps = MutableStateFlow<List<AppInfo>>(emptyList())
-    val installedApps: StateFlow<List<AppInfo>> = _installedApps.asStateFlow()
+    val monitoredApps: StateFlow<List<MonitoredApp>>
+    
+    // All installed apps loaded once at startup
+    private val _allApps = MutableStateFlow<List<AppInfo>>(emptyList())
+    val installedApps: StateFlow<List<AppInfo>> = _allApps.asStateFlow()
+    
     val filteredApps: StateFlow<List<AppInfo>>
     
-    // Function to get cached icon or load it
-    suspend fun getAppIcon(packageName: String): android.graphics.drawable.Drawable {
-        // Check cache first
-        iconCache[packageName]?.let { return it }
-        
-        // Load from package manager
-        return withContext(Dispatchers.IO) {
-            try {
-                val pm = getApplication<Application>().packageManager
-                val icon = pm.getApplicationIcon(packageName)
-                iconCache[packageName] = icon
-                icon
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to load icon for $packageName", e)
-                val pm = getApplication<Application>().packageManager
-                val defaultIcon = pm.defaultActivityIcon
-                iconCache[packageName] = defaultIcon
-                defaultIcon
-            }
-        }
-    }
+    // Today's intention logs for the graph
+    val todaysLogs: StateFlow<List<IntentionLog>>
 
     init {
-        val monitoredAppDao = AppDatabase.getDatabase(application).monitoredAppDao()
+        val monitoredAppDao = database.monitoredAppDao()
         repository = MonitoredAppRepository(monitoredAppDao)
 
-        monitoredApps = repository.allMonitoredApps.map { list ->
-            list.map { it.packageName }
-        }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        monitoredApps = repository.allMonitoredApps
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        
+        // Get start of today for log filtering
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val startOfDay = calendar.timeInMillis
+        
+        todaysLogs = database.intentionLogDao().getTodaysLogs(startOfDay)
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-        // Load all apps immediately but WITHOUT icons - super fast!
+        // Load ALL apps once at startup (in background, doesn't block UI)
         viewModelScope.launch(Dispatchers.IO) {
             val pm = getApplication<Application>().packageManager
             val intent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
             val resolveInfos = pm.queryIntentActivities(intent, 0)
             
-            // Map to AppInfo with null icons - instant loading!
             val apps = resolveInfos.map { resolveInfo ->
                 AppInfo(
                     name = resolveInfo.loadLabel(pm).toString(),
-                    packageName = resolveInfo.activityInfo.packageName,
-                    icon = null  // Icons will be loaded lazily when items become visible
+                    packageName = resolveInfo.activityInfo.packageName
                 )
             }.sortedBy { it.name.lowercase() }
             
-            _installedApps.value = apps
+            _allApps.value = apps
             _isInitialized.value = true
-            Log.d("AppListViewModel", "Initialized with ${apps.size} apps")
+            Log.d(TAG, "Loaded ${apps.size} apps")
         }
         
-        filteredApps = combine(installedApps, searchQuery) { apps, query ->
+        // Debounced filtering - waits 150ms after user stops typing
+        // Also excludes apps that are already monitored
+        filteredApps = combine(
+            searchQuery.debounce(150),
+            _allApps,
+            monitoredApps
+        ) { query, apps, monitored ->
+            val monitoredPackages = monitored.map { it.packageName }.toSet()
             if (query.isBlank()) {
-                apps
+                emptyList() // Don't show any apps until user searches
             } else {
-                apps.filter { it.name.contains(query, ignoreCase = true) }
+                apps.filter { 
+                    it.name.contains(query, ignoreCase = true) && 
+                    !monitoredPackages.contains(it.packageName)
+                }
             }
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
-        
-        loadUserProfile()
     }
     
-    private fun loadUserProfile() {
-        viewModelScope.launch {
-            try {
-                val session = supabase.auth.currentSessionOrNull()
-                val user = session?.user
-                
-                Log.d("AppListViewModel", "Loading user profile...")
-                Log.d("AppListViewModel", "Session: $session")
-                Log.d("AppListViewModel", "User: $user")
-                Log.d("AppListViewModel", "User metadata: ${user?.userMetadata}")
-                
-                val name = user?.userMetadata?.get("full_name") as? String 
-                    ?: user?.userMetadata?.get("name") as? String
-                val email = user?.email
-                val photoUrl = user?.userMetadata?.get("avatar_url") as? String
-                    ?: user?.userMetadata?.get("picture") as? String
-                
-                Log.d("AppListViewModel", "Extracted name: $name")
-                Log.d("AppListViewModel", "Extracted email: $email")
-                Log.d("AppListViewModel", "Extracted photoUrl: $photoUrl")
-                
-                _userProfile.value = UserProfile(
-                    name = name,
-                    email = email,
-                    photoUrl = photoUrl
-                )
-                
-                Log.d("AppListViewModel", "User profile set: ${_userProfile.value}")
-            } catch (e: Exception) {
-                Log.e("AppListViewModel", "Error loading user profile", e)
-                e.printStackTrace()
-            }
-        }
-    }
+    // Not needed anymore but kept for compatibility
+    fun loadNextPage() { }
     
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
     }
+    
+    // Toggle app selection (for UI only, not database)
+    fun toggleAppSelection(packageName: String) {
+        val currentSelection = _selectedApps.value.toMutableSet()
+        if (currentSelection.contains(packageName)) {
+            currentSelection.remove(packageName)
+        } else {
+            currentSelection.add(packageName)
+        }
+        _selectedApps.value = currentSelection
+    }
+    
+    // Initialize selection state from current monitored apps
+    fun initializeSelectionFromMonitored() {
+        viewModelScope.launch {
+            try {
+                val currentMonitored = monitoredApps.first().map { it.packageName }.toSet()
+                _selectedApps.value = currentMonitored
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing selection", e)
+            }
+        }
+    }
+    
+    // Clear selection state
+    fun clearSelection() {
+        _selectedApps.value = emptySet()
+    }
+    
+    // Bulk add selected apps to local database (adds to existing, doesn't replace)
+    suspend fun addSelectedAppsToMonitored() {
+        try {
+            val appsToAdd = _selectedApps.value.toList()
+            
+            // Add selected apps to local database (keep existing monitored apps)
+            appsToAdd.forEach { packageName ->
+                val appName = _allApps.value.find { it.packageName == packageName }?.name ?: packageName
+                // Insert will be ignored if already exists due to primary key
+                repository.insert(MonitoredApp(packageName, appName))
+            }
+            
+            Log.d(TAG, "Added ${appsToAdd.size} new apps to monitoring")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adding apps to monitoring", e)
+        }
+    }
 
     fun onAppChecked(packageName: String, isChecked: Boolean) {
         viewModelScope.launch {
-            if (isChecked) {
-                repository.insert(MonitoredApp(packageName))
-            } else {
+            try {
+                if (isChecked) {
+                    val appName = _allApps.value.find { it.packageName == packageName }?.name ?: packageName
+                    repository.insert(MonitoredApp(packageName, appName))
+                } else {
+                    repository.delete(MonitoredApp(packageName))
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error updating app checked state", e)
+            }
+        }
+    }
+    
+    // Delete a monitored app (local only)
+    fun deleteMonitoredApp(packageName: String) {
+        viewModelScope.launch {
+            try {
+                Log.d(TAG, "Deleting monitored app: $packageName")
                 repository.delete(MonitoredApp(packageName))
+            } catch (e: Exception) {
+                Log.e(TAG, "Error deleting monitored app", e)
             }
         }
     }
 
     fun startMonitoring() {
-        val context = getApplication<Application>()
-        val intent = Intent(context, AppMonitorService::class.java)
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(context, intent)
-        } else {
-            context.startService(intent)
+        try {
+            val context = getApplication<Application>()
+            val intent = Intent(context, AppMonitorService::class.java)
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(context, intent)
+            } else {
+                context.startService(intent)
+            }
+            
+            _isMonitoring.value = true
+            sharedPrefs.edit().putBoolean("is_monitoring", true).apply()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting monitoring", e)
         }
-        
-        _isMonitoring.value = true
-        sharedPrefs.edit().putBoolean("is_monitoring", true).apply()
     }
 
     fun stopMonitoring() {
-        val context = getApplication<Application>()
-        val intent = Intent(context, AppMonitorService::class.java)
-        context.stopService(intent)
-        
-        _isMonitoring.value = false
-        sharedPrefs.edit().putBoolean("is_monitoring", false).apply()
+        try {
+            val context = getApplication<Application>()
+            val intent = Intent(context, AppMonitorService::class.java)
+            context.stopService(intent)
+            
+            _isMonitoring.value = false
+            sharedPrefs.edit().putBoolean("is_monitoring", false).apply()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping monitoring", e)
+        }
+    }
+    
+    suspend fun getMonitoredApp(packageName: String): MonitoredApp? {
+        return withContext(Dispatchers.IO) {
+            try {
+                repository.getByPackageName(packageName)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error getting monitored app", e)
+                null
+            }
+        }
+    }
+    
+    suspend fun updateMonitoredApp(app: MonitoredApp) {
+        withContext(Dispatchers.IO) {
+            try {
+                repository.update(app)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error updating monitored app", e)
+            }
+        }
     }
 }

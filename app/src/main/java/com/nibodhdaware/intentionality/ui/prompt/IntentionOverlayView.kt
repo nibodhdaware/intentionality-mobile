@@ -1,23 +1,21 @@
 package com.nibodhdaware.intentionality.ui.prompt
 
 import android.util.Log
-import android.widget.Toast
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.nibodhdaware.intentionality.supabase.SupabaseRepository
 import com.nibodhdaware.intentionality.ui.theme.IntentionalityTheme
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,229 +25,236 @@ fun IntentionOverlayView(
     onProceed: (String, Int) -> Unit,
     onGoBack: () -> Unit
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val supabaseRepository = remember { SupabaseRepository() }
-    
     var reason by remember { mutableStateOf("") }
-    var selectedRating by remember { mutableStateOf(0) }
+    var dumbnessRating by remember { mutableIntStateOf(0) }
+    
+    // Count words (at least 3 required)
+    val wordCount = reason.trim().split("\\s+".toRegex()).filter { it.isNotBlank() }.size
+    val hasEnoughWords = wordCount >= 3
 
-    // Distraction level ratings
-    data class DistractionOption(val rating: Int, val label: String, val emoji: String)
-    val distractionOptions = listOf(
-        DistractionOption(1, "Actually Productive!", "🎯"),
-        DistractionOption(2, "Slightly Distracted", "😅"),
-        DistractionOption(3, "Pretty Distracted", "😬"),
-        DistractionOption(4, "Very Distracted", "😫"),
-        DistractionOption(5, "Extremely Distracted", "🤦‍♂️")
-    )
-
-    IntentionalityTheme(darkTheme = false) {
-        // Full-screen overlay with semi-transparent background
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.7f))
+    // Use the app's Material 3 theme with dynamic colors
+    IntentionalityTheme {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
         ) {
-            // Main content card
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .wrapContentHeight()
-                    .align(Alignment.Center)
-                    .padding(horizontal = 24.dp),
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 8.dp
-            ) {
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                topBar = {
+                    LargeTopAppBar(
+                        title = { 
+                            Text(
+                                text = "Intention Check",
+                                fontWeight = FontWeight.Bold
+                            ) 
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = onGoBack) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Go Back"
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.largeTopAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        )
+                    )
+                }
+            ) { paddingValues ->
                 Column(
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .fillMaxSize()
+                        .padding(paddingValues)
+                        .verticalScroll(rememberScrollState())
                         .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Title
-                    Text(
-                        text = "Why are you opening",
-                        style = MaterialTheme.typography.headlineSmall.copy(fontSize = 20.sp),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.Center
-                    )
+                    // App name card
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Opening",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = appName,
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(24.dp))
                     
                     Text(
-                        text = appName,
-                        style = MaterialTheme.typography.headlineMedium.copy(fontSize = 28.sp),
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 32.dp)
+                        text = "What do you need to do?",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
                     )
-
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
                     // Reason input
                     OutlinedTextField(
                         value = reason,
                         onValueChange = { reason = it },
-                        label = { Text("Your reason") },
-                        placeholder = { Text("Type your reason here...") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 16.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Your intention") },
+                        placeholder = { Text("e.g., Check a specific notification") },
+                        supportingText = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = if (hasEnoughWords) "✓ Good" else "Minimum 3 words",
+                                    color = if (hasEnoughWords) 
+                                        MaterialTheme.colorScheme.primary 
+                                    else 
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text("$wordCount words")
+                            }
+                        },
+                        isError = reason.isNotBlank() && !hasEnoughWords,
                         minLines = 3,
                         maxLines = 5,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                            focusedLabelColor = MaterialTheme.colorScheme.primary
-                        ),
-                        shape = MaterialTheme.shapes.medium
+                        shape = MaterialTheme.shapes.large
                     )
-
-                    // Distraction level selection (Radio button style)
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 24.dp)
-                    ) {
-                        Text(
-                            text = "How dumb is this reason? 🤔",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(bottom = 12.dp)
+                    
+                    Spacer(modifier = Modifier.height(32.dp))
+                    
+                    // Rating section
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
                         )
-                        
-                        distractionOptions.forEach { option ->
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                shape = MaterialTheme.shapes.medium,
-                                color = if (selectedRating == option.rating) {
-                                    MaterialTheme.colorScheme.primaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.surface
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "How valid is this reason?",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Text(
+                                text = when(dumbnessRating) {
+                                    1 -> "😬 Completely pointless"
+                                    2 -> "😕 Pretty weak"
+                                    3 -> "😐 Somewhat valid"
+                                    4 -> "🙂 Good reason"
+                                    5 -> "✨ Excellent reason"
+                                    else -> "Tap a star to rate"
                                 },
-                                border = BorderStroke(
-                                    width = 1.dp,
-                                    color = if (selectedRating == option.rating) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                                    }
-                                ),
-                                onClick = { selectedRating = option.rating }
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (dumbnessRating > 0) 
+                                    MaterialTheme.colorScheme.primary 
+                                else 
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            
+                            Spacer(modifier = Modifier.height(16.dp))
+                            
+                            // Star rating
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.Start,
-                                        modifier = Modifier.weight(1f)
+                                Spacer(modifier = Modifier.weight(1f))
+                                (1..5).forEach { star ->
+                                    FilledIconButton(
+                                        onClick = { dumbnessRating = star },
+                                        colors = IconButtonDefaults.filledIconButtonColors(
+                                            containerColor = if (star <= dumbnessRating) 
+                                                MaterialTheme.colorScheme.primary 
+                                            else 
+                                                MaterialTheme.colorScheme.surfaceVariant
+                                        ),
+                                        modifier = Modifier.size(48.dp)
                                     ) {
-                                        Text(
-                                            text = option.emoji,
-                                            style = MaterialTheme.typography.headlineSmall,
-                                            modifier = Modifier.padding(end = 12.dp)
-                                        )
-                                        Text(
-                                            text = option.label,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            color = if (selectedRating == option.rating) {
-                                                MaterialTheme.colorScheme.onPrimaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurface
-                                            }
+                                        Icon(
+                                            imageVector = if (star <= dumbnessRating) 
+                                                Icons.Filled.Star 
+                                            else 
+                                                Icons.Outlined.Star,
+                                            contentDescription = "Star $star",
+                                            tint = if (star <= dumbnessRating) 
+                                                MaterialTheme.colorScheme.onPrimary 
+                                            else 
+                                                MaterialTheme.colorScheme.outline,
+                                            modifier = Modifier.size(28.dp)
                                         )
                                     }
-                                    
-                                    RadioButton(
-                                        selected = selectedRating == option.rating,
-                                        onClick = { selectedRating = option.rating },
-                                        colors = RadioButtonDefaults.colors(
-                                            selectedColor = MaterialTheme.colorScheme.primary
-                                        )
-                                    )
                                 }
+                                Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }
-
-                    // Buttons in a row - Go Back on left, Submit on right
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    
+                    Spacer(modifier = Modifier.weight(1f))
+                    
+                    Spacer(modifier = Modifier.height(24.dp))
+                    
+                    // Buttons
+                    Button(
+                        onClick = {
+                            Log.d("IntentionOverlayView", "Continue: reason='$reason', rating=$dumbnessRating")
+                            onProceed(reason.trim(), dumbnessRating)
+                        },
+                        enabled = hasEnoughWords && dumbnessRating > 0,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = MaterialTheme.shapes.large
                     ) {
-                        // Go Back button (left side)
-                        OutlinedButton(
-                            onClick = onGoBack,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(52.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = Color(0xFFE63946) // Red color for cancel action
-                            ),
-                            border = BorderStroke(2.dp, Color(0xFFE63946)),
-                            shape = MaterialTheme.shapes.medium
-                        ) {
-                            Text(
-                                text = "Go Back",
-                                style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-
-                        // Submit button (right side)
-                        Button(
-                            onClick = {
-                                if (reason.isNotBlank() && selectedRating > 0) {
-                                    // Save to database
-                                    scope.launch {
-                                        try {
-                                            val userId = supabaseRepository.getUserId() ?: "anonymous"
-                                            supabaseRepository.saveAppEntry(
-                                                appName = appName,
-                                                packageName = packageName,
-                                                reason = reason,
-                                                rating = selectedRating,
-                                                userId = userId
-                                            )
-                                            Log.d("IntentionOverlayView", "✅ Entry saved successfully!")
-                                            
-                                            // Call onProceed to launch the app
-                                            onProceed(reason, selectedRating)
-                                        } catch (e: Exception) {
-                                            Log.e("IntentionOverlayView", "❌ Error saving entry", e)
-                                            Toast.makeText(context, "Failed to save entry", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(52.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-                            ),
-                            enabled = reason.isNotBlank() && selectedRating > 0,
-                            shape = MaterialTheme.shapes.medium
-                        ) {
-                            Text(
-                                text = "Submit",
-                                style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        Text(
+                            text = "Continue to $appName",
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    OutlinedButton(
+                        onClick = {
+                            Log.d("IntentionOverlayView", "Go back pressed")
+                            onGoBack()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = MaterialTheme.shapes.large
+                    ) {
+                        Text("Go Back")
+                    }
+                    
+                    Spacer(modifier = Modifier.height(24.dp))
                 }
             }
         }
     }
 }
-
-

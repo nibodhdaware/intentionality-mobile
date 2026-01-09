@@ -13,9 +13,11 @@ import androidx.core.app.NotificationCompat
 import com.nibodhdaware.intentionality.MainActivity
 import com.nibodhdaware.intentionality.R
 import com.nibodhdaware.intentionality.database.AppDatabase
+import com.nibodhdaware.intentionality.database.MonitoredApp
 import com.nibodhdaware.intentionality.database.MonitoredAppRepository
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import java.util.Calendar
 
 class AppMonitorService : Service() {
 
@@ -25,15 +27,25 @@ class AppMonitorService : Service() {
     private lateinit var repository: MonitoredAppRepository
     
     private var lastDetectedApp: String? = null
-    // Removed cooldown system - track every app open
-    private var cachedMonitoredApps: List<String> = emptyList()
+    private var cachedMonitoredApps: Map<String, MonitoredApp> = emptyMap() // Changed to store full app data
     private var lastCacheUpdate: Long = 0L
+    
+    // Track last overlay time for each app (for interval-based display)
+    private val lastOverlayTime = mutableMapOf<String, Long>()
     
     companion object {
         private const val TAG = "AppMonitorService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "app_monitor_channel"
         private const val CACHE_REFRESH_INTERVAL_MS = 10000L // Refresh cache every 10 seconds
+        private const val CHECK_INTERVAL_MS = 1000L // Check every 1 second
+        
+        // Static flag to track overlay state globally
+        var isOverlayVisible = false
+        var currentMonitoredApp: String? = null // Track which app is currently being monitored
+        
+        // Apps where user pressed Go Back - reset their timer to now
+        val appsToResetTimer = mutableSetOf<String>()
     }
 
     override fun onCreate() {
@@ -52,10 +64,10 @@ class AppMonitorService : Service() {
         scope.launch(Dispatchers.IO) {
             while (true) {
                 checkForegroundApp()
-                delay(500) // Check every 500ms for faster detection
+                delay(CHECK_INTERVAL_MS) // Check every 1 second
             }
         }
-        Log.d(TAG, "Monitoring loop started, checking every 500ms")
+        Log.d(TAG, "Monitoring loop started, checking every ${CHECK_INTERVAL_MS}ms")
         return START_STICKY
     }
 
@@ -67,6 +79,9 @@ class AppMonitorService : Service() {
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Monitors app usage for intentionality"
+                setShowBadge(false)
+                enableVibration(false)
+                setSound(null, null)
             }
             
             val notificationManager = getSystemService(NotificationManager::class.java)
@@ -75,7 +90,9 @@ class AppMonitorService : Service() {
     }
 
     private fun startForeground() {
-        val notificationIntent = Intent(this, MainActivity::class.java)
+        val notificationIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
@@ -84,11 +101,15 @@ class AppMonitorService : Service() {
         )
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Intentionality Active")
-            .setContentText("Monitoring your app usage")
+            .setContentTitle("Intentionality is Monitoring")
+            .setContentText("Tap to view your intentional apps")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
-            .setOngoing(true)
+            .setOngoing(true) // Makes it persistent
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setAutoCancel(false) // Prevent swiping away
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -109,8 +130,11 @@ class AppMonitorService : Service() {
             
             // Refresh cached monitored apps periodically instead of every check
             if (time - lastCacheUpdate > CACHE_REFRESH_INTERVAL_MS) {
-                cachedMonitoredApps = repository.allMonitoredApps.first().map { it.packageName }
+                cachedMonitoredApps = repository.allMonitoredApps.first()
+                    .associateBy { it.packageName }
                 lastCacheUpdate = time
+                // Update notification with count
+                updateNotification(cachedMonitoredApps.size)
             }
             
             // Query only last 2 seconds for faster detection
@@ -122,35 +146,164 @@ class AppMonitorService : Service() {
             
             val foregroundApp = usageStats?.maxByOrNull { it.lastTimeUsed }?.packageName
             
+            // If overlay is visible and the monitored app is no longer foreground, dismiss overlay
+            if (isOverlayVisible && currentMonitoredApp != null) {
+                if (foregroundApp != currentMonitoredApp && foregroundApp != packageName) {
+                    Log.d(TAG, "📱 Monitored app ($currentMonitoredApp) is no longer foreground. Dismissing overlay.")
+                    dismissCurrentOverlay()
+                }
+                return // Don't show new overlay while one is visible
+            }
+            
             // Log only when app actually changes
             if (foregroundApp != lastDetectedApp) {
                 Log.d(TAG, "App changed: $lastDetectedApp -> $foregroundApp")
             }
 
-            // Show prompt whenever a monitored app becomes foreground (including when switching back)
+            // Check if current foreground app is monitored
             if (foregroundApp != null && 
                 foregroundApp != packageName && // Ignore our own app
-                cachedMonitoredApps.contains(foregroundApp) &&
-                foregroundApp != lastDetectedApp // Only when it's a new foreground (including coming back)
+                cachedMonitoredApps.containsKey(foregroundApp) &&
+                !isOverlayVisible // Don't show if overlay is already visible
             ) {
-                Log.d(TAG, "✅ Showing prompt for: $foregroundApp (NEW OPEN or SWITCH BACK)")
-                lastDetectedApp = foregroundApp
-                showPrompt(foregroundApp)
-            } else {
-                // Update last detected app if changed
-                if (foregroundApp != lastDetectedApp) {
-                    lastDetectedApp = foregroundApp
+                // Check if this app needs timer reset (user pressed Go Back)
+                if (appsToResetTimer.contains(foregroundApp)) {
+                    appsToResetTimer.remove(foregroundApp)
+                    lastOverlayTime.remove(foregroundApp) // Clear timer so popup shows immediately
+                    Log.d(TAG, "🔄 Timer cleared for $foregroundApp - popup will show now")
+                    // Don't return - let it continue to show the popup
                 }
+                
+                val monitoredApp = cachedMonitoredApps[foregroundApp]!!
+                
+                // Check if we're within the active time window
+                if (isWithinActiveTime(monitoredApp)) {
+                    // Check if enough time has passed since last overlay
+                    val lastTime = lastOverlayTime[foregroundApp] ?: 0L
+                    val intervalMs = monitoredApp.intervalMinutes * 60 * 1000L
+                    val timeSinceLastOverlay = time - lastTime
+                    
+                    if (timeSinceLastOverlay >= intervalMs) {
+                        Log.d(TAG, "✅ Showing prompt for: $foregroundApp (interval: ${monitoredApp.intervalMinutes} min, time since last: ${timeSinceLastOverlay / 60000} min)")
+                        lastDetectedApp = foregroundApp
+                        currentMonitoredApp = foregroundApp
+                        isOverlayVisible = true
+                        lastOverlayTime[foregroundApp] = time
+                        showPrompt(foregroundApp)
+                    } else {
+                        val minutesRemaining = (intervalMs - timeSinceLastOverlay) / 60000
+                        if (foregroundApp != lastDetectedApp) {
+                            Log.d(TAG, "⏳ Waiting for interval: $foregroundApp (${minutesRemaining}min remaining)")
+                        }
+                    }
+                } else {
+                    if (foregroundApp != lastDetectedApp) {
+                        Log.d(TAG, "🕐 App outside active time window: $foregroundApp")
+                    }
+                }
+            }
+            
+            // Update last detected app
+            if (foregroundApp != lastDetectedApp) {
+                lastDetectedApp = foregroundApp
             }
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error in checkForegroundApp", e)
             e.printStackTrace()
         }
     }
+    
+    /**
+     * Check if current time is within the app's active window
+     */
+    private fun isWithinActiveTime(app: MonitoredApp): Boolean {
+        if (app.allDay) return true
+        
+        val calendar = Calendar.getInstance()
+        val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
+        val currentMinute = calendar.get(Calendar.MINUTE)
+        val currentTimeInMinutes = currentHour * 60 + currentMinute
+        
+        val startTimeInMinutes = app.startHour * 60 + app.startMinute
+        val endTimeInMinutes = app.endHour * 60 + app.endMinute
+        
+        return if (startTimeInMinutes <= endTimeInMinutes) {
+            // Same day (e.g., 9:00 AM to 5:00 PM)
+            currentTimeInMinutes in startTimeInMinutes..endTimeInMinutes
+        } else {
+            // Crosses midnight (e.g., 11:00 PM to 2:00 AM)
+            currentTimeInMinutes >= startTimeInMinutes || currentTimeInMinutes <= endTimeInMinutes
+        }
+    }
+    
+    private fun dismissCurrentOverlay() {
+        try {
+            val intent = Intent(this, OverlayService::class.java)
+            stopService(intent)
+            isOverlayVisible = false
+            currentMonitoredApp = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error dismissing overlay", e)
+        }
+    }
+    
+    private fun updateNotification(monitoredAppCount: Int) {
+        try {
+            val notificationIntent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                notificationIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val contentText = if (monitoredAppCount > 0) {
+                "Monitoring $monitoredAppCount ${if (monitoredAppCount == 1) "app" else "apps"}"
+            } else {
+                "No apps monitored yet"
+            }
+
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("Intentionality is Monitoring")
+                .setContentText(contentText)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setAutoCancel(false)
+                .build()
+
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating notification", e)
+        }
+    }
+    
+    /**
+     * Reset overlay timers for an app - allows it to show immediately next time
+     */
+    fun resetAppTimer(packageName: String) {
+        lastOverlayTime.remove(packageName)
+        Log.d(TAG, "Timer reset for app: $packageName")
+    }
+    
+    /**
+     * Reset all overlay timers - allows all apps to show immediately
+     */
+    fun resetAllTimers() {
+        lastOverlayTime.clear()
+        Log.d(TAG, "All app timers reset")
+    }
 
     private fun showPrompt(packageName: String) {
         try {
             Log.d(TAG, "===== showPrompt called for: $packageName =====")
+            
             val pm = applicationContext.packageManager
             val appName = try {
                 val appInfo = pm.getApplicationInfo(packageName, 0)
@@ -178,10 +331,13 @@ class AppMonitorService : Service() {
             
             Log.d(TAG, "Starting OverlayService...")
             startService(intent)
+            
             Log.d(TAG, "✅ OverlayService started successfully!")
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error showing prompt", e)
             e.printStackTrace()
+            isOverlayVisible = false
+            currentMonitoredApp = null
         }
     }
 

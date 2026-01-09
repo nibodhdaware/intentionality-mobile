@@ -8,27 +8,22 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.lifecycleScope
-import com.nibodhdaware.intentionality.supabase.SupabaseRepository
 import com.nibodhdaware.intentionality.ui.theme.IntentionalityTheme
-import kotlinx.coroutines.launch
 
 class IntentionPromptActivity : ComponentActivity() {
-    private val supabaseRepository = SupabaseRepository()
-
     companion object {
         private const val TAG = "IntentionPromptActivity"
     }
@@ -46,30 +41,23 @@ class IntentionPromptActivity : ComponentActivity() {
 
         try {
             setContent {
-                IntentionalityTheme(darkTheme = false) {
-                    FullScreenDialog(
+                IntentionalityTheme(darkTheme = true) {
+                    IntentionPromptScreen(
                         appName = appName,
                         packageName = packageName,
-                        onContinue = { message, selectedOption ->
-                            Log.d(TAG, "Continue clicked: message='$message', option=$selectedOption")
-                            lifecycleScope.launch {
-                                val success = saveEntry(appName, packageName, message, selectedOption)
-                                if (success) {
-                                    // Launch the app
-                                    val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-                                    launchIntent?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    if (launchIntent != null) {
-                                        Log.d(TAG, "Launching app: $packageName")
-                                        startActivity(launchIntent)
-                                    } else {
-                                        Log.e(TAG, "No launch intent found for: $packageName")
-                                        Toast.makeText(this@IntentionPromptActivity, "Could not launch app", Toast.LENGTH_SHORT).show()
-                                    }
-                                } else {
-                                    Toast.makeText(this@IntentionPromptActivity, "Failed to save entry", Toast.LENGTH_SHORT).show()
-                                }
-                                finish()
+                        onContinue = { _, _ ->
+                            Log.d(TAG, "Continue clicked - launching app")
+                            // Launch the app
+                            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+                            launchIntent?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            if (launchIntent != null) {
+                                Log.d(TAG, "Launching app: $packageName")
+                                startActivity(launchIntent)
+                            } else {
+                                Log.e(TAG, "No launch intent found for: $packageName")
+                                Toast.makeText(this@IntentionPromptActivity, "Could not launch app", Toast.LENGTH_SHORT).show()
                             }
+                            finish()
                         },
                         onCancel = {
                             Log.d(TAG, "Cancel clicked")
@@ -90,48 +78,11 @@ class IntentionPromptActivity : ComponentActivity() {
             e.printStackTrace()
         }
     }
-
-    private suspend fun saveEntry(
-        appName: String,
-        packageName: String,
-        reason: String,
-        distractionLevel: String
-    ): Boolean {
-        return try {
-            Log.d(TAG, "Saving entry to Supabase...")
-            val userId = supabaseRepository.getUserId() ?: "anonymous"
-            Log.d(TAG, "User ID: $userId")
-            
-            // Convert distraction level to rating (1-5)
-            val rating = when (distractionLevel) {
-                "productive" -> 1
-                "slightly_distracted" -> 2
-                "pretty_distracted" -> 3
-                "very_distracted" -> 4
-                "extremely_distracted" -> 5
-                else -> 3
-            }
-            
-            supabaseRepository.saveAppEntry(
-                appName = appName,
-                packageName = packageName,
-                reason = reason,
-                rating = rating,
-                userId = userId
-            )
-            Log.d(TAG, "✅ Entry saved successfully!")
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error saving entry", e)
-            e.printStackTrace()
-            false
-        }
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FullScreenDialog(
+fun IntentionPromptScreen(
     appName: String,
     packageName: String,
     onContinue: (String, String) -> Unit,
@@ -139,157 +90,234 @@ fun FullScreenDialog(
 ) {
     var message by remember { mutableStateOf("") }
     var selectedOption by remember { mutableStateOf("") }
-    var dropdownExpanded by remember { mutableStateOf(false) }
 
-    // Distraction level options
+    // Distraction level options - without emojis
     data class DistractionOption(val value: String, val label: String)
     val options = listOf(
-        DistractionOption("productive", "Actually Productive! 🎯"),
-        DistractionOption("slightly_distracted", "Slightly Distracted 😅"),
-        DistractionOption("pretty_distracted", "Pretty Distracted 😬"),
-        DistractionOption("very_distracted", "Very Distracted 😫"),
-        DistractionOption("extremely_distracted", "Extremely Distracted 🤦‍♂️")
+        DistractionOption("productive", "Actually Productive!"),
+        DistractionOption("slightly_distracted", "Slightly Distracted"),
+        DistractionOption("pretty_distracted", "Pretty Distracted"),
+        DistractionOption("very_distracted", "Very Distracted"),
+        DistractionOption("extremely_distracted", "Extremely Distracted")
     )
 
-    // Full-screen overlay with semi-transparent background
+    // Full-screen with gradient background using theme colors
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.7f))
+            .background(backgroundColor)
             .statusBarsPadding()
-            .navigationBarsPadding(),
-        contentAlignment = Alignment.Center
+            .navigationBarsPadding()
     ) {
-        // White card container
-        Surface(
+        Column(
             modifier = Modifier
-                .fillMaxWidth(0.9f)
-                .wrapContentHeight()
-                .shadow(16.dp, RoundedCornerShape(24.dp)),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
+            // Header Section - Minimal
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Title
                 Text(
-                    text = "Configure Monitored App",
-                    style = MaterialTheme.typography.headlineSmall.copy(fontSize = 24.sp),
+                    text = "Before You Continue...",
+                    style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(bottom = 12.dp)
+                    color = MaterialTheme.colorScheme.onBackground,
+                    textAlign = TextAlign.Center
                 )
-
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
                 Text(
-                    text = appName,
-                    style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(bottom = 24.dp)
+                    text = "You're about to open",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
                 )
-
-                // Message input
-                OutlinedTextField(
-                    value = message,
-                    onValueChange = { message = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 20.dp),
-                    label = { Text("Why are you opening this app?") },
-                    placeholder = { Text("Enter your reason...") },
-                    minLines = 3,
-                    maxLines = 5,
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Surface(
                     shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                ) {
+                    Text(
+                        text = appName,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
                     )
-                )
+                }
+            }
 
-                // Dropdown for distraction level
-                ExposedDropdownMenuBox(
-                    expanded = dropdownExpanded,
-                    onExpandedChange = { dropdownExpanded = it },
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Question 1: Why are you opening this app?
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 32.dp)
+                        .padding(20.dp)
                 ) {
-                    OutlinedTextField(
-                        value = options.find { it.value == selectedOption }?.label ?: "",
-                        onValueChange = {},
-                        readOnly = true,
-                        modifier = Modifier
-                            .menuAnchor()
-                            .fillMaxWidth(),
-                        label = { Text("How distracted are you?") },
-                        placeholder = { Text("Select an option...") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                        )
+                    Text(
+                        text = "Why are you opening this app?",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 12.dp)
                     )
+                    
+                    OutlinedTextField(
+                        value = message,
+                        onValueChange = { message = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { 
+                            Text(
+                                "e.g., Check messages from friends, Learn something new...", 
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            ) 
+                        },
+                        minLines = 3,
+                        maxLines = 5,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
 
-                    ExposedDropdownMenu(
-                        expanded = dropdownExpanded,
-                        onDismissRequest = { dropdownExpanded = false }
-                    ) {
-                        options.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text(option.label) },
-                                onClick = {
-                                    selectedOption = option.value
-                                    dropdownExpanded = false
+            // Question 2: How productive is this?
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "How productive is this?",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    
+                    // Radio button options
+                    options.forEach { option ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (selectedOption == option.value) 
+                                MaterialTheme.colorScheme.primaryContainer
+                            else 
+                                MaterialTheme.colorScheme.surface,
+                            border = if (selectedOption == option.value)
+                                androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                            else
+                                androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            onClick = { selectedOption = option.value }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = option.label,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (selectedOption == option.value)
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    else
+                                        MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = if (selectedOption == option.value) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                                
+                                if (selectedOption == option.value) {
+                                    Icon(
+                                        imageVector = Icons.Filled.CheckCircle,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
                                 }
-                            )
+                            }
                         }
                     }
                 }
+            }
 
-                // Buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+            // Add space for buttons (fixed at bottom)
+            Spacer(modifier = Modifier.height(100.dp))
+        }
+
+        // Fixed Buttons at Bottom
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 8.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Go Back Button
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    // Cancel button
-                    TextButton(
-                        onClick = onCancel,
-                        modifier = Modifier.padding(end = 8.dp)
-                    ) {
-                        Text(
-                            "Cancel",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                        )
-                    }
+                    Text(
+                        "Go Back",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
 
-                    // Continue button
-                    Button(
-                        onClick = {
-                            if (message.isNotBlank() && selectedOption.isNotEmpty()) {
-                                onContinue(message, selectedOption)
-                            }
-                        },
-                        enabled = message.isNotBlank() && selectedOption.isNotEmpty(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary
-                        )
-                    ) {
-                        Text(
-                            "Continue",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                // Continue Button
+                Button(
+                    onClick = {
+                        if (message.isNotBlank() && selectedOption.isNotEmpty()) {
+                            onContinue(message, selectedOption)
+                        }
+                    },
+                    enabled = message.isNotBlank() && selectedOption.isNotEmpty(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        "Continue to App",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
