@@ -1,20 +1,20 @@
 package com.nibodhdaware.intentionality.ui.appconfig
 
-import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.nibodhdaware.intentionality.billing.BillingManager
 import com.nibodhdaware.intentionality.database.MonitoredApp
 import com.nibodhdaware.intentionality.ui.applist.AppListViewModel
 import kotlinx.coroutines.launch
@@ -24,10 +24,13 @@ import kotlinx.coroutines.launch
 fun AppConfigScreen(
     packageName: String,
     onNavigateBack: () -> Unit,
+    onNavigateToPaywall: (() -> Unit)? = null,
     viewModel: AppListViewModel = viewModel()
 ) {
-    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    
+    // Premium status
+    val isPremium by BillingManager.isPremium.collectAsState()
     
     // Fetch the app data
     var app by remember { mutableStateOf<MonitoredApp?>(null) }
@@ -49,12 +52,8 @@ fun AppConfigScreen(
     
     val currentApp = app!!
     
-    var allDay by remember { mutableStateOf(currentApp.allDay) }
-    var startHour by remember { mutableStateOf(currentApp.startHour) }
-    var startMinute by remember { mutableStateOf(currentApp.startMinute) }
-    var endHour by remember { mutableStateOf(currentApp.endHour) }
-    var endMinute by remember { mutableStateOf(currentApp.endMinute) }
     var intervalMinutes by remember { mutableStateOf(currentApp.intervalMinutes) }
+    var customIntention by remember { mutableStateOf(currentApp.customIntention) }
 
     Scaffold(
         topBar = {
@@ -92,143 +91,209 @@ fun AppConfigScreen(
                 }
             }
 
-            // Time Schedule Section
+            // Custom Intention Section - Premium Feature
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = "Active Time Window",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    
-                    // All Day Toggle
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Active All Day")
-                        Switch(
-                            checked = allDay,
-                            onCheckedChange = { allDay = it }
+                        Text(
+                            text = "Custom Intention",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
                         )
-                    }
-
-                    if (!allDay) {
-                        HorizontalDivider()
-                        
-                        // Start Time Picker
-                        OutlinedButton(
-                            onClick = {
-                                TimePickerDialog(
-                                    context,
-                                    { _, hour, minute ->
-                                        startHour = hour
-                                        startMinute = minute
-                                    },
-                                    startHour,
-                                    startMinute,
-                                    true
-                                ).show()
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    text = "Start Time",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                                Text(
-                                    text = String.format("%02d:%02d", startHour, startMinute),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold
-                                )
+                        if (!isPremium) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Star,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Premium",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
+                    }
+                    
+                    Text(
+                        text = if (isPremium) "Set a custom prompt for this app" else "Create personalized prompts for each app",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    if (isPremium) {
+                        OutlinedTextField(
+                            value = customIntention,
+                            onValueChange = { customIntention = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Custom intention prompt") },
+                            placeholder = { Text("e.g., \"Why are you opening this app right now?\"") },
+                            minLines = 2,
+                            maxLines = 4,
+                            supportingText = {
+                                Text(
+                                    text = if (customIntention.isBlank()) "Leave empty to use default prompt" else "${customIntention.length} characters"
+                                )
+                            }
+                        )
+                    } else {
+                        // Upgrade prompt for non-premium users
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                         
-                        // End Time Picker
-                        OutlinedButton(
-                            onClick = {
-                                TimePickerDialog(
-                                    context,
-                                    { _, hour, minute ->
-                                        endHour = hour
-                                        endMinute = minute
-                                    },
-                                    endHour,
-                                    endMinute,
-                                    true
-                                ).show()
-                            },
-                            modifier = Modifier.fillMaxWidth()
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    text = "End Time",
-                                    style = MaterialTheme.typography.labelSmall
+                            Text(
+                                text = "Uses default: \"What's your intention?\"",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = { onNavigateToPaywall?.invoke() },
+                                shape = RoundedCornerShape(20.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
                                 )
-                                Text(
-                                    text = String.format("%02d:%02d", endHour, endMinute),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Upgrade to Customize")
                             }
                         }
                     }
                 }
             }
 
-            // Repeat Interval Section
+            // Repeat Interval Section - Premium Feature
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = "Overlay Repeat Interval",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Overlay Repeat Interval",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (!isPremium) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Star,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Premium",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
                     
                     Text(
-                        text = "Show overlay every $intervalMinutes ${if (intervalMinutes == 1) "minute" else "minutes"}",
+                        text = if (isPremium) "Show overlay every $intervalMinutes ${if (intervalMinutes == 1) "minute" else "minutes"}" else "Customize how often the intention prompt appears",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     
-                    Slider(
-                        value = intervalMinutes.toFloat(),
-                        onValueChange = { intervalMinutes = it.toInt() },
-                        valueRange = 1f..60f,
-                        steps = 58
-                    )
-                    
-                    // Quick presets
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(5, 10, 15, 30, 60).forEach { minutes ->
-                            FilledTonalButton(
-                                onClick = { intervalMinutes = minutes },
-                                modifier = Modifier.weight(1f),
-                                colors = if (intervalMinutes == minutes) {
-                                    ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    if (isPremium) {
+                        Slider(
+                            value = intervalMinutes.toFloat(),
+                            onValueChange = { intervalMinutes = it.toInt() },
+                            valueRange = 1f..60f,
+                            steps = 58
+                        )
+                        
+                        // Quick presets
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(5, 10, 15, 30, 60).forEach { minutes ->
+                                FilledTonalButton(
+                                    onClick = { intervalMinutes = minutes },
+                                    modifier = Modifier.weight(1f),
+                                    colors = if (intervalMinutes == minutes) {
+                                        ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        )
+                                    } else {
+                                        ButtonDefaults.filledTonalButtonColors()
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = "$minutes",
+                                        fontWeight = FontWeight.Bold
                                     )
-                                } else {
-                                    ButtonDefaults.filledTonalButtonColors()
-                                },
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+                                }
+                            }
+                        }
+                    } else {
+                        // Upgrade prompt for non-premium users
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                        
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Default: Every 15 minutes",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = { onNavigateToPaywall?.invoke() },
+                                shape = RoundedCornerShape(20.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                             ) {
-                                Text(
-                                    text = "$minutes",
-                                    fontWeight = FontWeight.Bold
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
                                 )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Upgrade to Customize")
                             }
                         }
                     }
@@ -252,19 +317,13 @@ fun AppConfigScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                     
-                    val timeText = if (allDay) {
-                        "Active all day"
-                    } else {
-                        "Works from ${String.format("%02d:%02d", startHour, startMinute)} to ${String.format("%02d:%02d", endHour, endMinute)}"
-                    }
-                    
                     Text(
-                        text = "• $timeText",
+                        text = "• Shows overlay every $intervalMinutes ${if (intervalMinutes == 1) "minute" else "minutes"}",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     
                     Text(
-                        text = "• Shows overlay every $intervalMinutes ${if (intervalMinutes == 1) "minute" else "minutes"}",
+                        text = if (customIntention.isNotBlank()) "• Custom prompt: \"${customIntention.take(30)}${if (customIntention.length > 30) "..." else ""}\"" else "• Using default prompt",
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
@@ -275,12 +334,8 @@ fun AppConfigScreen(
                 onClick = {
                     coroutineScope.launch {
                         val updatedApp = currentApp.copy(
-                            allDay = allDay,
-                            startHour = startHour,
-                            startMinute = startMinute,
-                            endHour = endHour,
-                            endMinute = endMinute,
-                            intervalMinutes = intervalMinutes
+                            intervalMinutes = intervalMinutes,
+                            customIntention = if (isPremium) customIntention else ""
                         )
                         viewModel.updateMonitoredApp(updatedApp)
                         onNavigateBack()

@@ -1,19 +1,38 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Data extraction rules for Android 12+ (API 31+)
+   Controls what data is backed up to cloud and transferred between devices.
    See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- Include all shared preferences (onboarding state, settings, etc.) -->
+        <include domain="sharedpref" path="." />
+        
+        <!-- Include Room database (monitored apps, intention logs, etc.) -->
+        <include domain="database" path="." />
+        
+        <!-- Include DataStore preferences -->
+        <include domain="file" path="datastore/" />
+        
+        <!-- Exclude cache files -->
+        <exclude domain="cache" path="." />
+        
+        <!-- Exclude no-backup files if any -->
+        <exclude domain="file" path="no_backup/" />
     </cloud-backup>
-    <!--
+    
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <!-- Include all shared preferences -->
+        <include domain="sharedpref" path="." />
+        
+        <!-- Include Room database -->
+        <include domain="database" path="." />
+        
+        <!-- Include DataStore preferences -->
+        <include domain="file" path="datastore/" />
+        
+        <!-- Exclude cache files -->
+        <exclude domain="cache" path="." />
     </device-transfer>
-    -->
 </data-extraction-rules>

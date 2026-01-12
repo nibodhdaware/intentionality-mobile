@@ -1,13 +1,22 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Backup rules for Android Auto Backup (Android 5.0 - Android 11)
+   This ensures app data persists across reinstalls via Google Account backup.
    See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- Include all shared preferences (onboarding state, settings, etc.) -->
+    <include domain="sharedpref" path="." />
+    
+    <!-- Include Room database (monitored apps, intention logs, etc.) -->
+    <include domain="database" path="." />
+    
+    <!-- Include DataStore preferences -->
+    <include domain="file" path="datastore/" />
+    
+    <!-- Exclude cache files -->
+    <exclude domain="cache" path="." />
+    
+    <!-- Exclude no-backup files if any -->
+    <exclude domain="file" path="no_backup/" />
 </full-backup-content>

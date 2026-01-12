@@ -22,11 +22,15 @@ import com.nibodhdaware.intentionality.ui.theme.IntentionalityTheme
 fun IntentionOverlayView(
     appName: String,
     packageName: String,
+    customIntention: String = "",
     onProceed: (String, Int) -> Unit,
     onGoBack: () -> Unit
 ) {
     var reason by remember { mutableStateOf("") }
     var dumbnessRating by remember { mutableIntStateOf(0) }
+    
+    // Use custom intention prompt or default
+    val promptText = if (customIntention.isNotBlank()) customIntention else "What do you need to do?"
     
     // Count words (at least 3 required)
     val wordCount = reason.trim().split("\\s+".toRegex()).filter { it.isNotBlank() }.size
@@ -102,9 +106,10 @@ fun IntentionOverlayView(
                     Spacer(modifier = Modifier.height(24.dp))
                     
                     Text(
-                        text = "What do you need to do?",
+                        text = promptText,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center
                     )
                     
                     Spacer(modifier = Modifier.height(16.dp))

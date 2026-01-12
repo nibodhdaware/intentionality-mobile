@@ -51,6 +51,7 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
         private const val TAG = "OverlayService"
         const val EXTRA_APP_NAME = "app_name"
         const val EXTRA_PACKAGE_NAME = "package_name"
+        const val EXTRA_CUSTOM_INTENTION = "custom_intention"
     }
 
     override val lifecycle: Lifecycle get() = lifecycleRegistry
@@ -70,8 +71,9 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
 
         val appName = intent?.getStringExtra(EXTRA_APP_NAME) ?: "Unknown App"
         val packageName = intent?.getStringExtra(EXTRA_PACKAGE_NAME) ?: ""
+        val customIntention = intent?.getStringExtra(EXTRA_CUSTOM_INTENTION) ?: ""
 
-        Log.d(TAG, "Showing overlay for app: $appName ($packageName)")
+        Log.d(TAG, "Showing overlay for app: $appName ($packageName), customIntention: ${if (customIntention.isNotBlank()) "'$customIntention'" else "(default)"}")
 
         // Debounce check - prevent rapid recreation
         val currentTime = System.currentTimeMillis()
@@ -87,12 +89,12 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
         monitoredPackageName = packageName
 
         // Show new overlay
-        showOverlay(appName, packageName)
+        showOverlay(appName, packageName, customIntention)
 
         return START_NOT_STICKY
     }
 
-    private fun showOverlay(appName: String, packageName: String) {
+    private fun showOverlay(appName: String, packageName: String, customIntention: String) {
         try {
             windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
@@ -127,6 +129,7 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                     IntentionOverlayView(
                         appName = appName,
                         packageName = packageName,
+                        customIntention = customIntention,
                         onProceed = { reason, rating ->
                             Log.d(TAG, "Overlay submitted: reason='$reason', rating=$rating")
                             // Save to database

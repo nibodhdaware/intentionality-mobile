@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [MonitoredApp::class, IntentionLog::class], version = 4, exportSchema = false)
+@Database(entities = [MonitoredApp::class, IntentionLog::class], version = 5, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun monitoredAppDao(): MonitoredAppDao
@@ -51,6 +51,15 @@ abstract class AppDatabase : RoomDatabase() {
                 """)
             }
         }
+        
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Add customIntention column for per-app custom prompts (Premium feature)
+                database.execSQL("ALTER TABLE monitored_apps ADD COLUMN customIntention TEXT NOT NULL DEFAULT ''")
+                // Note: We keep the old time scheduling columns for backwards compatibility
+                // They are no longer used but removing them would require table recreation
+            }
+        }
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -59,7 +68,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "app_database"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                 INSTANCE = instance
                 instance

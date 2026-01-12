@@ -9,13 +9,21 @@ data class MonitoredApp(
     val packageName: String,
     val appName: String = "", // Default empty for backwards compatibility
     
-    // Time schedule - when the overlay should be active
-    val startHour: Int = 0,      // 0-23, 0 = midnight
-    val startMinute: Int = 0,    // 0-59
-    val endHour: Int = 23,       // 0-23, 23 = 11 PM
-    val endMinute: Int = 59,     // 0-59
-    val allDay: Boolean = true,  // If true, ignore start/end times
+    // Custom intention prompt for this specific app (Premium feature)
+    val customIntention: String = "", // Empty means use default prompt
     
     // Repeat interval - how often to show overlay
-    val intervalMinutes: Int = 5 // Show overlay every X minutes (default: 5)
+    val intervalMinutes: Int = 5, // Show overlay every X minutes (default: 5)
+    
+    // Legacy fields - kept for database schema compatibility, no longer used
+    @Deprecated("Time window scheduling removed - monitoring is manual now")
+    val startHour: Int = 0,
+    @Deprecated("Time window scheduling removed - monitoring is manual now")
+    val startMinute: Int = 0,
+    @Deprecated("Time window scheduling removed - monitoring is manual now")
+    val endHour: Int = 23,
+    @Deprecated("Time window scheduling removed - monitoring is manual now")
+    val endMinute: Int = 59,
+    @Deprecated("Time window scheduling removed - monitoring is manual now")
+    val allDay: Boolean = true
 )

@@ -1,23 +1,30 @@
 package com.nibodhdaware.intentionality.ui.home
 
+import android.Manifest
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Star
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,12 +39,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
+import com.nibodhdaware.intentionality.billing.BillingManager
 import com.nibodhdaware.intentionality.database.IntentionLog
 import com.nibodhdaware.intentionality.ui.applist.AppListViewModel
 import com.nibodhdaware.intentionality.ui.onboarding.FeatureDiscoveryOverlay
 import com.nibodhdaware.intentionality.ui.onboarding.FeatureHighlight
 import com.nibodhdaware.intentionality.ui.onboarding.HighlightCoordinatesState
+import com.nibodhdaware.intentionality.ui.onboarding.OnboardingPreferences
 import com.nibodhdaware.intentionality.ui.onboarding.trackHighlight
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -47,18 +57,59 @@ fun HomeScreen(
     onNavigateToAddApps: () -> Unit,
     onNavigateToProfile: (() -> Unit)? = null,
     onNavigateToAppConfig: ((String) -> Unit)? = null,
+    onNavigateToPaywall: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     viewModel: AppListViewModel = viewModel(),
     showFeatureDiscovery: Boolean = false,
-    onFeatureDiscoveryComplete: () -> Unit = {}
+    onFeatureDiscoveryComplete: () -> Unit = {},
+    requestNotificationPermission: Boolean = false,
+    onNotificationPermissionRequested: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val onboardingPreferences = remember { OnboardingPreferences(context) }
     val monitoredApps by viewModel.monitoredApps.collectAsState()
     val todaysLogs by viewModel.todaysLogs.collectAsState()
     val isMonitoring by viewModel.isMonitoring.collectAsState()
+    
+    // Premium status
+    val isPremium by BillingManager.isPremium.collectAsState()
+    
     var showUsagePermissionDialog by remember { mutableStateOf(false) }
     var showOverlayPermissionDialog by remember { mutableStateOf(false) }
+    var showNotificationPermissionDialog by remember { mutableStateOf(false) }
     var isEditMode by remember { mutableStateOf(false) }
+    
+    // Notification permission launcher (Android 13+)
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            // Permission granted, notification will work
+        }
+    }
+    
+    // Check notification permission on first load after onboarding
+    fun hasNotificationPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true // Permission not required before Android 13
+        }
+    }
+    
+    // Show notification permission dialog when requested (after onboarding/feature discovery)
+    LaunchedEffect(requestNotificationPermission) {
+        if (requestNotificationPermission) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotificationPermission()) {
+                showNotificationPermissionDialog = true
+            }
+            onNotificationPermissionRequested()
+        }
+    }
     
     // Feature discovery state
     val highlightState = remember { HighlightCoordinatesState() }
@@ -145,7 +196,14 @@ fun HomeScreen(
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { onNavigateToAddApps() },
+                onClick = { 
+                    // Check if user can add more apps (premium or under free limit)
+                    if (BillingManager.canAddMoreApps(monitoredApps.size)) {
+                        onNavigateToAddApps()
+                    } else {
+                        onNavigateToPaywall?.invoke()
+                    }
+                },
                 icon = { Icon(Icons.Default.Add, contentDescription = "Add") },
                 text = { Text("Add Apps") },
                 modifier = Modifier.trackHighlight(highlightState, FeatureHighlight.ADD_APPS_FAB)
@@ -236,14 +294,65 @@ fun HomeScreen(
                 }
             }
             
-            // Today's Dumbness Rating Graph - Always show
+            // Today's Dumbness Rating Graph - Premium feature with paywall overlay
             item {
-                DumbnessRatingGraph(
-                    logs = todaysLogs,
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 8.dp)
-                )
+                ) {
+                    DumbnessRatingGraph(
+                        logs = todaysLogs,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    // Paywall overlay if not premium
+                    if (!isPremium) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .matchParentSize(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(28.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Premium Feature",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = { onNavigateToPaywall?.invoke() },
+                                    shape = RoundedCornerShape(20.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Star,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Upgrade")
+                                }
+                            }
+                        }
+                    }
+                }
             }
             
             // Monitored Apps Section Header
@@ -368,6 +477,45 @@ fun HomeScreen(
         )
     }
     
+    // Notification Permission Dialog
+    if (showNotificationPermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { 
+                showNotificationPermissionDialog = false
+                scope.launch { onboardingPreferences.setNotificationPermissionAsked() }
+            },
+            title = { Text("Enable Notifications") },
+            text = { 
+                Text(
+                    "Intentionality needs notification permission to show a persistent status " +
+                    "notification while monitoring your apps. This helps keep the app running " +
+                    "in the background."
+                ) 
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showNotificationPermissionDialog = false
+                        scope.launch { onboardingPreferences.setNotificationPermissionAsked() }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                ) {
+                    Text("Allow")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { 
+                    showNotificationPermissionDialog = false
+                    scope.launch { onboardingPreferences.setNotificationPermissionAsked() }
+                }) {
+                    Text("Not Now")
+                }
+            }
+        )
+    }
+    
     // Feature Discovery Overlay
     if (showFeatureDiscovery && currentHighlight != FeatureHighlight.COMPLETE) {
         FeatureDiscoveryOverlay(
@@ -416,10 +564,8 @@ fun MonitoredAppItem(
         },
         supportingContent = {
             if (monitoredApp != null) {
-                val timeText = if (monitoredApp!!.allDay) "All day" else 
-                    "${String.format("%02d:%02d", monitoredApp!!.startHour, monitoredApp!!.startMinute)}-${String.format("%02d:%02d", monitoredApp!!.endHour, monitoredApp!!.endMinute)}"
                 Text(
-                    text = "$timeText • Every ${monitoredApp!!.intervalMinutes}min"
+                    text = "Every ${monitoredApp!!.intervalMinutes}min${if (monitoredApp!!.customIntention.isNotBlank()) " • Custom prompt" else ""}"
                 )
             }
         },

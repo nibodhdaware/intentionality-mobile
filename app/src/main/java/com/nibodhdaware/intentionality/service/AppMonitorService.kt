@@ -1,5 +1,6 @@
 package com.nibodhdaware.intentionality.service
 
+import android.Manifest
 import android.app.*
 import android.app.usage.UsageStatsManager
 import android.content.Context
@@ -10,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.nibodhdaware.intentionality.MainActivity
 import com.nibodhdaware.intentionality.R
 import com.nibodhdaware.intentionality.database.AppDatabase
@@ -101,25 +103,47 @@ class AppMonitorService : Service() {
         return START_STICKY
     }
 
+    private fun hasNotificationPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true // Permission not required before Android 13
+        }
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            
+            // Check if channel already exists
+            val existingChannel = notificationManager.getNotificationChannel(CHANNEL_ID)
+            if (existingChannel != null) {
+                Log.d(TAG, "Notification channel already exists")
+                return
+            }
+            
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "App Monitoring",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Monitors app usage for intentionality"
+                description = "Shows when Intentionality is monitoring your app usage"
                 setShowBadge(false)
                 enableVibration(false)
                 setSound(null, null)
             }
             
-            val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
+            Log.d(TAG, "Notification channel created: $CHANNEL_ID")
         }
     }
 
     private fun startForeground() {
+        Log.d(TAG, "Starting foreground service, has notification permission: ${hasNotificationPermission()}")
+        
         val notificationIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -251,7 +275,7 @@ class AppMonitorService : Service() {
                         currentMonitoredApp = foregroundApp
                         isOverlayVisible = true
                         lastOverlayTime[foregroundApp] = time
-                        showPrompt(foregroundApp)
+                        showPrompt(foregroundApp, monitoredApp.customIntention)
                     } else {
                         val minutesRemaining = (intervalMs - timeSinceLastOverlay) / 60000
                         if (foregroundApp != lastDetectedApp) {
@@ -276,26 +300,12 @@ class AppMonitorService : Service() {
     }
     
     /**
-     * Check if current time is within the app's active window
+     * Check if monitoring is active (always true now - monitoring is controlled by user starting/stopping the service)
      */
     private fun isWithinActiveTime(app: MonitoredApp): Boolean {
-        if (app.allDay) return true
-        
-        val calendar = Calendar.getInstance()
-        val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
-        val currentMinute = calendar.get(Calendar.MINUTE)
-        val currentTimeInMinutes = currentHour * 60 + currentMinute
-        
-        val startTimeInMinutes = app.startHour * 60 + app.startMinute
-        val endTimeInMinutes = app.endHour * 60 + app.endMinute
-        
-        return if (startTimeInMinutes <= endTimeInMinutes) {
-            // Same day (e.g., 9:00 AM to 5:00 PM)
-            currentTimeInMinutes in startTimeInMinutes..endTimeInMinutes
-        } else {
-            // Crosses midnight (e.g., 11:00 PM to 2:00 AM)
-            currentTimeInMinutes >= startTimeInMinutes || currentTimeInMinutes <= endTimeInMinutes
-        }
+        // Always active - time window scheduling removed
+        // Monitoring is controlled by user manually starting/stopping the service
+        return true
     }
     
     private fun dismissCurrentOverlay() {
@@ -310,6 +320,12 @@ class AppMonitorService : Service() {
     }
     
     private fun updateNotification(monitoredAppCount: Int) {
+        // Check for notification permission on Android 13+
+        if (!hasNotificationPermission()) {
+            Log.w(TAG, "Cannot update notification - missing POST_NOTIFICATIONS permission")
+            return
+        }
+        
         try {
             val notificationIntent = Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -399,7 +415,7 @@ class AppMonitorService : Service() {
         Log.d(TAG, "All app timers reset")
     }
 
-    private fun showPrompt(packageName: String) {
+    private fun showPrompt(packageName: String, customIntention: String = "") {
         try {
             Log.d(TAG, "===== showPrompt called for: $packageName =====")
             
@@ -412,7 +428,7 @@ class AppMonitorService : Service() {
                 packageName
             }
 
-            Log.d(TAG, "App name: $appName")
+            Log.d(TAG, "App name: $appName, customIntention: ${if (customIntention.isNotBlank()) "'$customIntention'" else "(default)"}")
             
             // Check if we have SYSTEM_ALERT_WINDOW permission
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -426,6 +442,7 @@ class AppMonitorService : Service() {
             val intent = Intent(this, OverlayService::class.java).apply {
                 putExtra(OverlayService.EXTRA_APP_NAME, appName)
                 putExtra(OverlayService.EXTRA_PACKAGE_NAME, packageName)
+                putExtra(OverlayService.EXTRA_CUSTOM_INTENTION, customIntention)
             }
             
             Log.d(TAG, "Starting OverlayService...")

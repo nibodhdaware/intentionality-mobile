@@ -1,14 +1,18 @@
 package com.nibodhdaware.intentionality.ui.onboarding
 
+import android.Manifest
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -76,6 +80,13 @@ fun OnboardingScreen(
             permissionType = PermissionType.OVERLAY
         ),
         OnboardingPage(
+            icon = Icons.Default.Notifications,
+            title = "Notification Permission",
+            description = "Required to show a persistent status notification while monitoring. This helps keep the app running in the background.",
+            isPermission = true,
+            permissionType = PermissionType.NOTIFICATIONS
+        ),
+        OnboardingPage(
             icon = Icons.Default.CheckCircle,
             title = "You're Ready!",
             description = "We'll give you a quick tour of the app next."
@@ -83,6 +94,31 @@ fun OnboardingScreen(
     )
     
     val pagerState = rememberPagerState(pageCount = { pages.size })
+    
+    // Track permission states with periodic refresh
+    var permissionRefreshTrigger by remember { mutableIntStateOf(0) }
+    
+    // Periodically check permissions when on a permission page
+    LaunchedEffect(pagerState.currentPage) {
+        while (true) {
+            delay(500) // Check every 500ms
+            permissionRefreshTrigger++
+        }
+    }
+    
+    // Calculate if current page permission is granted
+    val currentPage = pages.getOrNull(pagerState.currentPage)
+    val isCurrentPermissionGranted = remember(permissionRefreshTrigger, pagerState.currentPage) {
+        when (currentPage?.permissionType) {
+            PermissionType.USAGE_ACCESS -> hasUsageStatsPermission(context)
+            PermissionType.OVERLAY -> Settings.canDrawOverlays(context)
+            PermissionType.NOTIFICATIONS -> hasNotificationPermission(context)
+            null -> true // Non-permission pages are always "granted"
+        }
+    }
+    
+    // Button should be enabled if: not a permission page, or permission is granted
+    val isNextButtonEnabled = !currentPage?.isPermission!! || isCurrentPermissionGranted
     
     Scaffold { paddingValues ->
         Box(
@@ -163,7 +199,12 @@ fun OnboardingScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp),
-                        shape = RoundedCornerShape(16.dp)
+                        shape = RoundedCornerShape(16.dp),
+                        enabled = isNextButtonEnabled,
+                        colors = ButtonDefaults.buttonColors(
+                            disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                            disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        )
                     ) {
                         Text(
                             text = if (pagerState.currentPage < pages.size - 1) "Next" else "Get Started",
@@ -252,7 +293,7 @@ private fun OnboardingPageContent(
             val hasPermission = when (page.permissionType) {
                 PermissionType.USAGE_ACCESS -> hasUsageStatsPermission(context)
                 PermissionType.OVERLAY -> Settings.canDrawOverlays(context)
-                PermissionType.NOTIFICATIONS -> true // Handled by system
+                PermissionType.NOTIFICATIONS -> hasNotificationPermission(context)
             }
             
             OutlinedButton(
@@ -331,4 +372,15 @@ private fun hasUsageStatsPermission(context: Context): Boolean {
         )
     }
     return mode == AppOpsManager.MODE_ALLOWED
+}
+
+private fun hasNotificationPermission(context: Context): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+    } else {
+        true // Permission not required before Android 13
+    }
 }

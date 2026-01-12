@@ -55,6 +55,10 @@ fun AppNavigator() {
     
     val hasCompletedOnboarding by onboardingPreferences.hasCompletedOnboarding.collectAsState(initial = null)
     val hasCompletedFeatureDiscovery by onboardingPreferences.hasCompletedFeatureDiscovery.collectAsState(initial = true)
+    val hasAskedNotificationPermission by onboardingPreferences.hasAskedNotificationPermission.collectAsState(initial = true)
+    
+    // Track if we should request notification permission
+    var requestNotificationPermission by remember { mutableStateOf(false) }
     
     when (currentScreen) {
         AppScreen.SPLASH -> {
@@ -85,6 +89,9 @@ fun AppNavigator() {
             // Show feature discovery if coming from onboarding and not yet completed
             val shouldShowDiscovery = showFeatureDiscovery || (hasCompletedFeatureDiscovery == false)
             
+            // Request notification permission after feature discovery is done (or if skipped)
+            val shouldRequestNotification = !shouldShowDiscovery && hasAskedNotificationPermission == false
+            
             MainScreen(
                 onLogout = { /* No-op, no login/logout */ },
                 modifier = Modifier.fillMaxSize(),
@@ -94,6 +101,12 @@ fun AppNavigator() {
                     scope.launch {
                         onboardingPreferences.setFeatureDiscoveryCompleted()
                     }
+                    // Trigger notification permission request after feature discovery
+                    requestNotificationPermission = true
+                },
+                requestNotificationPermission = shouldRequestNotification || requestNotificationPermission,
+                onNotificationPermissionRequested = {
+                    requestNotificationPermission = false
                 }
             )
         }

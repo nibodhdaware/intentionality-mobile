@@ -280,11 +280,7 @@ object FirebaseManager {
                     "packageName" to app.packageName,
                     "appName" to app.appName,
                     "isInstalled" to app.isInstalled,
-                    "startHour" to app.startHour,
-                    "startMinute" to app.startMinute,
-                    "endHour" to app.endHour,
-                    "endMinute" to app.endMinute,
-                    "allDay" to app.allDay,
+                    "customIntention" to app.customIntention,
                     "intervalMinutes" to app.intervalMinutes
                 )
             }
@@ -339,11 +335,7 @@ object FirebaseManager {
                 val packageName = appMap["packageName"] as? String
                 val appName = appMap["appName"] as? String
                 val isInstalled = appMap["isInstalled"] as? Boolean ?: true
-                val startHour = (appMap["startHour"] as? Long)?.toInt() ?: 0
-                val startMinute = (appMap["startMinute"] as? Long)?.toInt() ?: 0
-                val endHour = (appMap["endHour"] as? Long)?.toInt() ?: 23
-                val endMinute = (appMap["endMinute"] as? Long)?.toInt() ?: 59
-                val allDay = appMap["allDay"] as? Boolean ?: true
+                val customIntention = appMap["customIntention"] as? String ?: ""
                 val intervalMinutes = (appMap["intervalMinutes"] as? Long)?.toInt() ?: 5
                 
                 if (packageName != null) {
@@ -351,11 +343,7 @@ object FirebaseManager {
                         packageName = packageName,
                         appName = appName ?: packageName,
                         isInstalled = isInstalled,
-                        startHour = startHour,
-                        startMinute = startMinute,
-                        endHour = endHour,
-                        endMinute = endMinute,
-                        allDay = allDay,
+                        customIntention = customIntention,
                         intervalMinutes = intervalMinutes
                     )
                 } else {
@@ -390,11 +378,7 @@ data class MonitoredAppData(
     val packageName: String,
     val appName: String,
     val isInstalled: Boolean = true,
-    val startHour: Int = 0,
-    val startMinute: Int = 0,
-    val endHour: Int = 23,
-    val endMinute: Int = 59,
-    val allDay: Boolean = true,
+    val customIntention: String = "",
     val intervalMinutes: Int = 5
 )
 

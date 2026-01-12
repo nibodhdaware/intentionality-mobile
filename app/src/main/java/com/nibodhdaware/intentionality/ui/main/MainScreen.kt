@@ -25,6 +25,7 @@ import androidx.navigation.navArgument
 import androidx.navigation.NavType
 import com.nibodhdaware.intentionality.ui.appconfig.AppConfigScreen
 import com.nibodhdaware.intentionality.ui.applist.AppListScreen
+import com.nibodhdaware.intentionality.ui.billing.PaywallScreen
 import com.nibodhdaware.intentionality.ui.home.HomeScreen
 import com.nibodhdaware.intentionality.ui.profile.ProfileScreen
 
@@ -64,7 +65,9 @@ fun MainScreen(
     onLogout: () -> Unit,
     modifier: Modifier = Modifier,
     showFeatureDiscovery: Boolean = false,
-    onFeatureDiscoveryComplete: () -> Unit = {}
+    onFeatureDiscoveryComplete: () -> Unit = {},
+    requestNotificationPermission: Boolean = false,
+    onNotificationPermissionRequested: () -> Unit = {}
 ) {
     val navController = rememberNavController()
 
@@ -108,8 +111,24 @@ fun MainScreen(
                 onNavigateToAppConfig = { packageName ->
                     navController.navigate("app_config/$packageName")
                 },
+                onNavigateToPaywall = {
+                    navController.navigate("paywall")
+                },
                 showFeatureDiscovery = showFeatureDiscovery,
-                onFeatureDiscoveryComplete = onFeatureDiscoveryComplete
+                onFeatureDiscoveryComplete = onFeatureDiscoveryComplete,
+                requestNotificationPermission = requestNotificationPermission,
+                onNotificationPermissionRequested = onNotificationPermissionRequested
+            )
+        }
+
+        composable("paywall") {
+            PaywallScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onPurchaseSuccess = {
+                    navController.popBackStack()
+                }
             )
         }
 
@@ -138,6 +157,9 @@ fun MainScreen(
                 onLogout = onLogout,
                 onNavigateBack = {
                     navController.popBackStack()
+                },
+                onNavigateToPaywall = {
+                    navController.navigate("paywall")
                 }
             )
         }
@@ -145,10 +167,7 @@ fun MainScreen(
         composable("add_apps") {
             AppListScreen(
                 onNavigateBack = {
-                    navController.navigate(BottomNavItem.MyUsage.route) {
-                        popUpTo(BottomNavItem.MyUsage.route) { inclusive = false }
-                        launchSingleTop = true
-                    }
+                    navController.popBackStack()
                 }
             )
         }
@@ -162,6 +181,9 @@ fun MainScreen(
                 packageName = packageName,
                 onNavigateBack = {
                     navController.popBackStack()
+                },
+                onNavigateToPaywall = {
+                    navController.navigate("paywall")
                 }
             )
         }

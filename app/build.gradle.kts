@@ -99,6 +99,10 @@ dependencies {
     implementation("com.mikepenz:iconics-core:5.4.0")
     implementation("com.mikepenz:iconics-compose:5.4.0")
     implementation("com.mikepenz:fontawesome-typeface:5.9.0.2-kotlin@aar")
+    
+    // RevenueCat for in-app purchases and subscriptions
+    implementation("com.revenuecat.purchases:purchases:9.19.0")
+    implementation("com.revenuecat.purchases:purchases-ui:9.19.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
