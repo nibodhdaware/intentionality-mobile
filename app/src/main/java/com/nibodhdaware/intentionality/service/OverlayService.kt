@@ -30,6 +30,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import com.nibodhdaware.intentionality.billing.BillingManager // Added import
+import com.nibodhdaware.intentionality.firebase.FirebaseManager // Added import
+import android.content.pm.PackageManager
 
 class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
@@ -287,7 +290,31 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                     dumbnessRating = rating
                 )
                 db.intentionLogDao().insert(log)
-                Log.d(TAG, "Saved intention log: $appName, rating=$rating")
+                Log.d(TAG, "Saved intention log locally: $appName, rating=$rating")
+
+                // Sync to Firebase if user is signed in and has Pro entitlement
+                if (FirebaseManager.isUserSignedIn() && BillingManager.hasProEntitlement()) {
+                    val saveResult = FirebaseManager.saveAppEntry(
+                        appName = appName,
+                        packageName = packageName,
+                        reason = reason,
+                        dumbReason = when (rating) {
+                            1 -> "extremely_distracted"
+                            2 -> "very_distracted"
+                            3 -> "pretty_distracted"
+                            4 -> "slightly_distracted"
+                            5 -> "productive"
+                            else -> "unknown"
+                        },
+                        sessionDuration = 0.0, // Session duration is not captured here directly
+                        url = "app://$packageName"
+                    )
+                    saveResult.onSuccess {
+                        Log.d(TAG, "Synced intention log to Firebase: $appName, rating=$rating")
+                    }.onFailure { e ->
+                        Log.e(TAG, "Failed to sync intention log to Firebase: ${e.message}", e)
+                    }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error saving intention log", e)
             }

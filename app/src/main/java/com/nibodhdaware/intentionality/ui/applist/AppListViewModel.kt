@@ -21,6 +21,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.FlowPreview
 import java.util.Calendar
+import com.nibodhdaware.intentionality.billing.BillingManager
+import com.nibodhdaware.intentionality.firebase.FirebaseManager // Import FirebaseManager
 
 private const val TAG = "AppListViewModel"
 
@@ -71,7 +73,7 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         val monitoredAppDao = database.monitoredAppDao()
-        repository = MonitoredAppRepository(monitoredAppDao)
+        repository = MonitoredAppRepository(monitoredAppDao, Dispatchers.IO) // Pass dispatcher
 
         monitoredApps = repository.allMonitoredApps
             .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -104,6 +106,11 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
             _allApps.value = apps
             _isInitialized.value = true
             Log.d(TAG, "Loaded ${apps.size} apps")
+
+            // Fetch and merge from Firebase if user is premium and signed in
+            if (BillingManager.hasProEntitlement() && FirebaseManager.isUserSignedIn()) {
+                repository.fetchAndMergeFromFirebase()
+            }
         }
         
         // Debounced filtering - waits 150ms after user stops typing
@@ -133,14 +140,31 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
     }
     
     // Toggle app selection (for UI only, not database)
-    fun toggleAppSelection(packageName: String) {
+    // Returns false if free user has hit their limit
+    fun toggleAppSelection(packageName: String): Boolean {
         val currentSelection = _selectedApps.value.toMutableSet()
-        if (currentSelection.contains(packageName)) {
+        val isCurrentlySelected = currentSelection.contains(packageName)
+        
+        if (isCurrentlySelected) {
+            // Always allow deselection
             currentSelection.remove(packageName)
+            _selectedApps.value = currentSelection
+            return true
         } else {
+            // Check if free user can add more apps
+            val currentMonitoredCount = monitoredApps.value.size
+            val currentSelectedCount = currentSelection.size
+            val totalAfterAdd = currentMonitoredCount + currentSelectedCount + 1
+            
+            if (!BillingManager.canAddMoreApps(currentMonitoredCount + currentSelectedCount)) {
+                // Free user has hit their limit
+                return false
+            }
+            
             currentSelection.add(packageName)
+            _selectedApps.value = currentSelection
+            return true
         }
-        _selectedApps.value = currentSelection
     }
     
     // Initialize selection state from current monitored apps
@@ -173,6 +197,7 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
             }
             
             Log.d(TAG, "Added ${appsToAdd.size} new apps to monitoring")
+            repository.syncToFirebase() // Sync to Firebase after adding apps
         } catch (e: Exception) {
             Log.e(TAG, "Error adding apps to monitoring", e)
         }
@@ -187,6 +212,7 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
                 } else {
                     repository.delete(MonitoredApp(packageName))
                 }
+                repository.syncToFirebase() // Sync to Firebase after app checked state changes
             } catch (e: Exception) {
                 Log.e(TAG, "Error updating app checked state", e)
             }
@@ -199,6 +225,7 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
             try {
                 Log.d(TAG, "Deleting monitored app: $packageName")
                 repository.delete(MonitoredApp(packageName))
+                repository.syncToFirebase() // Sync to Firebase after deleting app
             } catch (e: Exception) {
                 Log.e(TAG, "Error deleting monitored app", e)
             }
@@ -210,7 +237,7 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
             val context = getApplication<Application>()
             val intent = Intent(context, AppMonitorService::class.java)
             
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION.CODES.O) {
                 ContextCompat.startForegroundService(context, intent)
             } else {
                 context.startService(intent)
@@ -251,6 +278,7 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
         withContext(Dispatchers.IO) {
             try {
                 repository.update(app)
+                repository.syncToFirebase() // Sync to Firebase after updating app
             } catch (e: Exception) {
                 Log.e(TAG, "Error updating monitored app", e)
             }

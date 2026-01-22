@@ -24,4 +24,7 @@ interface MonitoredAppDao {
     
     @Query("SELECT * FROM monitored_apps WHERE packageName = :packageName LIMIT 1")
     suspend fun getByPackageName(packageName: String): MonitoredApp?
+
+    @Query("DELETE FROM monitored_apps")
+    suspend fun clearAll()
 }
