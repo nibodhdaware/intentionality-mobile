@@ -11,12 +11,10 @@ import androidx.compose.ui.platform.LocalContext
 import com.nibodhdaware.intentionality.ui.main.MainScreen
 import com.nibodhdaware.intentionality.ui.onboarding.OnboardingPreferences
 import com.nibodhdaware.intentionality.ui.onboarding.OnboardingScreen
-import com.nibodhdaware.intentionality.ui.onboarding.SplashScreen
 import com.nibodhdaware.intentionality.ui.theme.IntentionalityTheme
 import kotlinx.coroutines.launch
 
 enum class AppScreen {
-    SPLASH,
     ONBOARDING,
     MAIN
 }
@@ -38,41 +36,34 @@ fun AppNavigator() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val onboardingPreferences = remember { OnboardingPreferences(context) }
+
+    val hasCompletedOnboarding by onboardingPreferences.hasCompletedOnboarding.collectAsState(initial = null)
     
-    var currentScreen by remember { mutableStateOf(AppScreen.SPLASH) }
-    var hasCheckedOnboarding by remember { mutableStateOf(false) }
+    var currentScreen by remember { mutableStateOf<AppScreen?>(null) }
     var showFeatureDiscovery by remember { mutableStateOf(false) }
-    
-    // Check if onboarding is completed
-    LaunchedEffect(Unit) {
-        onboardingPreferences.hasCompletedOnboarding.collect { completed ->
-            if (!hasCheckedOnboarding) {
-                hasCheckedOnboarding = true
-                // Will be used after splash
+
+    LaunchedEffect(hasCompletedOnboarding) {
+        if (hasCompletedOnboarding != null) {
+            currentScreen = if (hasCompletedOnboarding == true) {
+                AppScreen.MAIN
+            } else {
+                AppScreen.ONBOARDING
             }
         }
     }
-    
-    val hasCompletedOnboarding by onboardingPreferences.hasCompletedOnboarding.collectAsState(initial = null)
+
     val hasCompletedFeatureDiscovery by onboardingPreferences.hasCompletedFeatureDiscovery.collectAsState(initial = true)
     val hasAskedNotificationPermission by onboardingPreferences.hasAskedNotificationPermission.collectAsState(initial = true)
-    
+
     // Track if we should request notification permission
     var requestNotificationPermission by remember { mutableStateOf(false) }
-    
+
+    if (currentScreen == null) {
+        // Show a loading state or a blank screen while determining the route
+        return
+    }
+
     when (currentScreen) {
-        AppScreen.SPLASH -> {
-            SplashScreen(
-                onSplashComplete = {
-                    currentScreen = if (hasCompletedOnboarding == true) {
-                        AppScreen.MAIN
-                    } else {
-                        AppScreen.ONBOARDING
-                    }
-                }
-            )
-        }
-        
         AppScreen.ONBOARDING -> {
             OnboardingScreen(
                 onOnboardingComplete = {
@@ -109,6 +100,9 @@ fun AppNavigator() {
                     requestNotificationPermission = false
                 }
             )
+        }
+        null -> {
+            // Handled by the check above
         }
     }
 }

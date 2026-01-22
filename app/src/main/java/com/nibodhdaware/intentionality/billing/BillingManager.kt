@@ -46,7 +46,7 @@ object BillingManager {
     const val PRODUCT_LIFETIME = "lifetime"
     
     // Free tier limits
-    const val FREE_APP_LIMIT = 1
+    const val FREE_APP_LIMIT = 3
     
     // State flows for reactive UI updates
     private val _isPremium = MutableStateFlow(false)
@@ -313,7 +313,8 @@ object BillingManager {
         _offerings.value?.current?.availablePackages ?: emptyList()
     
     /**
-     * Check if user can add more apps (premium or under free limit)
+     * Check if user can add more apps (premium or under/at free limit)
+     * Free users can add up to FREE_APP_LIMIT apps (1 app)
      */
     fun canAddMoreApps(currentAppCount: Int): Boolean {
         return _isPremium.value || currentAppCount < FREE_APP_LIMIT
