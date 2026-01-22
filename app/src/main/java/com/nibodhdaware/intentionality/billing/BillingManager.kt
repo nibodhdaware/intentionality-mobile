@@ -46,7 +46,7 @@ object BillingManager {
     const val PRODUCT_LIFETIME = "lifetime"
     
     // Free tier limits
-    const val FREE_APP_LIMIT = 3
+    const val FREE_APP_LIMIT = 5
     
     // State flows for reactive UI updates
     private val _isPremium = MutableStateFlow(false)
