@@ -55,7 +55,8 @@ import java.util.*
 @Composable
 fun HomeScreen(
     onNavigateToAddApps: () -> Unit,
-    onNavigateToProfile: (() -> Unit)? = null,
+    onNavigateToSettings: (() -> Unit)? = null,
+    onNavigateToProfile: (() -> Unit)? = null, // New parameter for profile navigation
     onNavigateToAppConfig: ((String) -> Unit)? = null,
     onNavigateToPaywall: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -182,14 +183,24 @@ fun HomeScreen(
                 )
                 },
                 actions = {
-                    IconButton(
-                        onClick = { onNavigateToProfile?.invoke() },
-                        modifier = Modifier.trackHighlight(highlightState, FeatureHighlight.SETTINGS_BUTTON)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Settings"
-                        )
+                    onNavigateToProfile?.let { navigateToProfile ->
+                        IconButton(onClick = navigateToProfile) {
+                            Icon(
+                                imageVector = Icons.Default.Lock, // Placeholder for profile icon
+                                contentDescription = "Profile"
+                            )
+                        }
+                    }
+                    onNavigateToSettings?.let { navigateToSettings ->
+                        IconButton(
+                            onClick = navigateToSettings,
+                            modifier = Modifier.trackHighlight(highlightState, FeatureHighlight.SETTINGS_BUTTON)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings"
+                            )
+                        }
                     }
                 }
             )

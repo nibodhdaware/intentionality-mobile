@@ -11,12 +11,17 @@ import androidx.compose.ui.platform.LocalContext
 import com.nibodhdaware.intentionality.ui.main.MainScreen
 import com.nibodhdaware.intentionality.ui.onboarding.OnboardingPreferences
 import com.nibodhdaware.intentionality.ui.onboarding.OnboardingScreen
+import com.nibodhdaware.intentionality.ui.billing.PaywallScreen
 import com.nibodhdaware.intentionality.ui.theme.IntentionalityTheme
+import com.nibodhdaware.intentionality.ui.theme.ThemePreferences
+import com.nibodhdaware.intentionality.ui.theme.ThemeMode
+import androidx.compose.foundation.isSystemInDarkTheme
 import kotlinx.coroutines.launch
 
 enum class AppScreen {
     ONBOARDING,
-    MAIN
+    MAIN,
+    PAYWALL // New screen for pricing
 }
 
 class MainActivity : ComponentActivity() {
@@ -24,7 +29,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            IntentionalityTheme(darkTheme = true) {
+            val context = LocalContext.current
+            val themePreferences = remember { ThemePreferences(context) }
+            val selectedThemeMode by themePreferences.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
+            
+            val useDarkTheme = when (selectedThemeMode) {
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
+            
+            IntentionalityTheme(darkTheme = useDarkTheme) {
                 AppNavigator()
             }
         }
@@ -70,8 +85,8 @@ fun AppNavigator() {
                     scope.launch {
                         onboardingPreferences.setOnboardingCompleted()
                     }
-                    showFeatureDiscovery = true
-                    currentScreen = AppScreen.MAIN
+                    // Navigate to PaywallScreen after onboarding
+                    currentScreen = AppScreen.PAYWALL
                 }
             )
         }
@@ -98,6 +113,15 @@ fun AppNavigator() {
                 requestNotificationPermission = shouldRequestNotification || requestNotificationPermission,
                 onNotificationPermissionRequested = {
                     requestNotificationPermission = false
+                }
+            )
+        }
+        
+        AppScreen.PAYWALL -> {
+            PaywallScreen(
+                onDismiss = {
+                    // Navigate to MainScreen after paywall is dismissed
+                    currentScreen = AppScreen.MAIN
                 }
             )
         }

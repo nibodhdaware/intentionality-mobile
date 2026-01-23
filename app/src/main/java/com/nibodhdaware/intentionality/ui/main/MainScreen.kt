@@ -28,6 +28,7 @@ import com.nibodhdaware.intentionality.ui.applist.AppListScreen
 import com.nibodhdaware.intentionality.ui.billing.PaywallScreen
 import com.nibodhdaware.intentionality.ui.home.HomeScreen
 import com.nibodhdaware.intentionality.ui.profile.ProfileScreen
+import com.nibodhdaware.intentionality.ui.settings.SettingsScreen // Import SettingsScreen
 
 sealed class BottomNavItem(
     val route: String,
@@ -114,6 +115,9 @@ fun MainScreen(
                 onNavigateToPaywall = {
                     navController.navigate("paywall")
                 },
+                onNavigateToSettings = {
+                    navController.navigate("settings_route") // Navigate to settings
+                },
                 showFeatureDiscovery = showFeatureDiscovery,
                 onFeatureDiscoveryComplete = onFeatureDiscoveryComplete,
                 requestNotificationPermission = requestNotificationPermission,
@@ -168,6 +172,9 @@ fun MainScreen(
             AppListScreen(
                 onNavigateBack = {
                     navController.popBackStack()
+                },
+                onNavigateToPaywall = {
+                    navController.navigate("paywall")
                 }
             )
         }
@@ -187,5 +194,12 @@ fun MainScreen(
                 }
             )
         }
-    }
-}
+
+        // New composable for SettingsScreen
+        composable("settings_route") {
+            SettingsScreen(
+                onBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
