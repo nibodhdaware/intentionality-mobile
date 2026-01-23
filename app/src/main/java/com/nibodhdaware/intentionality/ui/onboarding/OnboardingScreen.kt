@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
 import androidx.compose.animation.*
@@ -41,13 +42,15 @@ data class OnboardingPage(
     val title: String,
     val description: String,
     val isPermission: Boolean = false,
-    val permissionType: PermissionType? = null
+    val permissionType: PermissionType? = null,
+    val isInteractive: Boolean = false // New parameter
 )
 
 enum class PermissionType {
     USAGE_ACCESS,
     OVERLAY,
-    NOTIFICATIONS
+    NOTIFICATIONS,
+    BATTERY_OPTIMIZATION
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,7 +58,7 @@ enum class PermissionType {
 fun OnboardingScreen(
     onOnboardingComplete: () -> Unit
 ) {
-    val context = LocalContext.current
+    val context = LocalContext.current // Get context once here
     val scope = rememberCoroutineScope()
     
     val pages = listOf(
@@ -63,6 +66,19 @@ fun OnboardingScreen(
             icon = Icons.Default.Star,
             title = "Welcome to Intentionality",
             description = "Be more mindful about your app usage. We'll need a few permissions to help you build better digital habits."
+        ),
+        // New page to explain the pop-up
+        OnboardingPage(
+            icon = Icons.Default.ChatBubble,
+            title = "How it Works: The Intention Prompt",
+            description = "When you open a monitored app, a small pop-up will appear. This prompt asks you to briefly state your reason for opening the app, helping you be more intentional."
+        ),
+        // New interactive demo page
+        OnboardingPage(
+            icon = Icons.Default.Lightbulb,
+            title = "Try it Out!",
+            description = "Imagine you're opening 'Make'. Type your intention below to see how it works.",
+            isInteractive = true // Mark as interactive
         ),
         // Permission pages
         OnboardingPage(
@@ -87,6 +103,13 @@ fun OnboardingScreen(
             permissionType = PermissionType.NOTIFICATIONS
         ),
         OnboardingPage(
+            icon = Icons.Default.Settings,
+            title = "Battery Optimization",
+            description = "Disable battery optimization to prevent Android from killing the monitoring service. Set to 'Unrestricted' or 'No restrictions' for best reliability.",
+            isPermission = true,
+            permissionType = PermissionType.BATTERY_OPTIMIZATION
+        ),
+        OnboardingPage(
             icon = Icons.Default.CheckCircle,
             title = "You're Ready!",
             description = "We'll give you a quick tour of the app next."
@@ -106,6 +129,9 @@ fun OnboardingScreen(
         }
     }
     
+    // State to track interaction on interactive pages
+    var interactivePageInteractionDone by remember { mutableStateOf(false) }
+    
     // Calculate if current page permission is granted
     val currentPage = pages.getOrNull(pagerState.currentPage)
     val isCurrentPermissionGranted = remember(permissionRefreshTrigger, pagerState.currentPage) {
@@ -113,12 +139,21 @@ fun OnboardingScreen(
             PermissionType.USAGE_ACCESS -> hasUsageStatsPermission(context)
             PermissionType.OVERLAY -> Settings.canDrawOverlays(context)
             PermissionType.NOTIFICATIONS -> hasNotificationPermission(context)
+            PermissionType.BATTERY_OPTIMIZATION -> isIgnoringBatteryOptimizations(context)
             null -> true // Non-permission pages are always "granted"
         }
     }
     
-    // Button should be enabled if: not a permission page, or permission is granted
-    val isNextButtonEnabled = !currentPage?.isPermission!! || isCurrentPermissionGranted
+    // Button should be enabled if: not a permission page, or permission is granted, or interactive page and interaction is done
+    val isNextButtonEnabled = remember(currentPage, isCurrentPermissionGranted, interactivePageInteractionDone) {
+        if (currentPage == null) return@remember false
+        
+        when {
+            currentPage.isPermission -> isCurrentPermissionGranted
+            currentPage.isInteractive -> interactivePageInteractionDone
+            else -> true // Regular content page
+        }
+    }
     
     Scaffold { paddingValues ->
         Box(
@@ -149,11 +184,21 @@ fun OnboardingScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                ) { page ->
-                    OnboardingPageContent(
-                        page = pages[page],
-                        context = context
-                    )
+                ) { pageIndex -> // Changed 'page' to 'pageIndex' to avoid confusion with OnboardingPage object
+                    val currentPageObject = pages[pageIndex]
+                    
+                    if (currentPageObject.isInteractive) {
+                        OnboardingPopupDemoContent(
+                            page = currentPageObject,
+                            onInteraction = { interactivePageInteractionDone = it }
+                        )
+                    } else {
+                        OnboardingPageContent(
+                            page = currentPageObject,
+                            context = context, // Pass context here
+                            onInteraction = { /* Not used for non-interactive pages */ }
+                        )
+                    }
                 }
                 
                 // Bottom section
@@ -192,6 +237,8 @@ fun OnboardingScreen(
                                 scope.launch {
                                     pagerState.animateScrollToPage(pagerState.currentPage + 1)
                                 }
+                                // Reset interaction state when moving to a new page
+                                interactivePageInteractionDone = false
                             } else {
                                 onOnboardingComplete()
                             }
@@ -225,10 +272,124 @@ fun OnboardingScreen(
     }
 }
 
+// New OnboardingPopupDemoContent composable
+@Composable
+private fun OnboardingPopupDemoContent(
+    page: OnboardingPage,
+    onInteraction: (Boolean) -> Unit // Callback for interaction status
+) {
+    var inputText by remember { mutableStateOf("") }
+    
+    LaunchedEffect(inputText) {
+        onInteraction(inputText.isNotBlank())
+    }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // Animated icon container
+        val infiniteTransition = rememberInfiniteTransition(label = "icon")
+        val scale by infiniteTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = 1.1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1000),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "scale"
+        )
+        
+        Box(
+            modifier = Modifier
+                .size(140.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = page.icon,
+                contentDescription = null,
+                modifier = Modifier.size(70.dp * scale), // Apply scale here
+                tint = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(40.dp))
+        
+        // Title
+        Text(
+            text = page.title,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Description
+        Text(
+            text = page.description,
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+            lineHeight = MaterialTheme.typography.bodyLarge.lineHeight * 1.3
+        )
+        
+        Spacer(modifier = Modifier.height(32.dp))
+        
+        // Mock pop-up UI
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            shape = RoundedCornerShape(16.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Why are you opening Make?",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = inputText,
+                    onValueChange = { inputText = it },
+                    label = { Text("Your intention (e.g., 'Check tasks')") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                // Add a mock 'Submit' button for visual completeness
+                Button(
+                    onClick = { /* Do nothing for demo */ },
+                    enabled = inputText.isNotBlank(), // Enable only if text is entered
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Submit Intention")
+                }
+            }
+        }
+    }
+}
+
+
 @Composable
 private fun OnboardingPageContent(
     page: OnboardingPage,
-    context: Context
+    context: Context, // Re-added context parameter
+    onInteraction: (Boolean) -> Unit = { }
 ) {
     Column(
         modifier = Modifier
@@ -294,6 +455,7 @@ private fun OnboardingPageContent(
                 PermissionType.USAGE_ACCESS -> hasUsageStatsPermission(context)
                 PermissionType.OVERLAY -> Settings.canDrawOverlays(context)
                 PermissionType.NOTIFICATIONS -> hasNotificationPermission(context)
+                PermissionType.BATTERY_OPTIMIZATION -> isIgnoringBatteryOptimizations(context)
             }
             
             OutlinedButton(
@@ -316,6 +478,13 @@ private fun OnboardingPageContent(
                                     putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                                 }
                             )
+                        }
+                        PermissionType.BATTERY_OPTIMIZATION -> {
+                            // Open battery optimization settings for this app
+                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            }
+                            context.startActivity(intent)
                         }
                     }
                 },
@@ -383,4 +552,9 @@ private fun hasNotificationPermission(context: Context): Boolean {
     } else {
         true // Permission not required before Android 13
     }
+}
+
+private fun isIgnoringBatteryOptimizations(context: Context): Boolean {
+    val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    return powerManager.isIgnoringBatteryOptimizations(context.packageName)
 }
