@@ -238,7 +238,7 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
             val context = getApplication<Application>()
             val intent = Intent(context, AppMonitorService::class.java)
             
-            if (Build.VERSION.SDK_INT >= Build.VERSION.CODES.O) {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 ContextCompat.startForegroundService(context, intent)
             } else {
                 context.startService(intent)
