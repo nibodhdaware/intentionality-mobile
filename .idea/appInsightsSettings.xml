@@ -8,10 +8,10 @@
             <InsightsFilterSettings>
               <option name="connection">
                 <ConnectionSetting>
-                  <option name="appId" value="com.nibodhdaware.intentionality" />
-                  <option name="mobileSdkAppId" value="1:938266027514:android:004ba96a69305b165d3043" />
-                  <option name="projectId" value="intentionality-1ce65" />
-                  <option name="projectNumber" value="938266027514" />
+                  <option name="appId" value="PLACEHOLDER" />
+                  <option name="mobileSdkAppId" value="" />
+                  <option name="projectId" value="" />
+                  <option name="projectNumber" value="" />
                 </ConnectionSetting>
               </option>
               <option name="signal" value="SIGNAL_UNSPECIFIED" />

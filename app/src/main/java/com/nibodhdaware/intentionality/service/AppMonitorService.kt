@@ -18,7 +18,7 @@ import com.nibodhdaware.intentionality.database.AppDatabase
 import com.nibodhdaware.intentionality.database.MonitoredApp
 import com.nibodhdaware.intentionality.database.MonitoredAppRepository
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.*
 import java.util.Calendar
 
 class AppMonitorService : Service() {
@@ -59,16 +59,32 @@ class AppMonitorService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "===== Service onCreate =====")
-        val monitoredAppDao = AppDatabase.getDatabase(this).monitoredAppDao()
-        repository = MonitoredAppRepository(monitoredAppDao)
-        
-        createNotificationChannel()
-        startForeground()
-        Log.d(TAG, "Service started in foreground")
+        try {
+            val monitoredAppDao = AppDatabase.getDatabase(this).monitoredAppDao()
+            repository = MonitoredAppRepository(monitoredAppDao)
+            
+            createNotificationChannel()
+            startForeground()
+            Log.d(TAG, "Service started in foreground successfully")
+
+            // Collect monitored apps flow to keep cache and notification updated
+            scope.launch {
+                repository.allMonitoredApps.collect { apps ->
+                    Log.d(TAG, "Monitored apps updated: ${apps.size}")
+                    cachedMonitoredApps = apps.associateBy { it.packageName }
+                    updateNotification(cachedMonitoredApps.size)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in service onCreate", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "===== Service onStartCommand =====")
+        Log.d(TAG, "Intent action: ${intent?.action}")
+        Log.d(TAG, "Intent extras: ${intent?.extras}")
+        Log.d(TAG, "Service isPaused: $isPaused")
         
         // Handle notification actions
         when (intent?.action) {
@@ -118,26 +134,24 @@ class AppMonitorService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = getSystemService(NotificationManager::class.java)
             
-            // Check if channel already exists
-            val existingChannel = notificationManager.getNotificationChannel(CHANNEL_ID)
-            if (existingChannel != null) {
-                Log.d(TAG, "Notification channel already exists")
-                return
-            }
+            // Always recreate channel to ensure correct settings
+            // Delete existing channel if it exists (in case settings changed)
+            notificationManager.deleteNotificationChannel(CHANNEL_ID)
             
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "App Monitoring",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT // Changed from LOW to DEFAULT for visibility
             ).apply {
                 description = "Shows when Intentionality is monitoring your app usage"
                 setShowBadge(false)
                 enableVibration(false)
                 setSound(null, null)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
             
             notificationManager.createNotificationChannel(channel)
-            Log.d(TAG, "Notification channel created: $CHANNEL_ID")
+            Log.d(TAG, "Notification channel created: $CHANNEL_ID with IMPORTANCE_DEFAULT")
         }
     }
 
@@ -177,15 +191,16 @@ class AppMonitorService : Service() {
         )
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("✅ Intentionality Active")
+            .setContentTitle("Intentionality Active")
             .setContentText("Starting monitoring...")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification_icon)
             .setContentIntent(pendingIntent)
             .setOngoing(true) // Makes it persistent
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT) // Changed from LOW for visibility
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(false) // Prevent swiping away
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE) // Show immediately
             .addAction(
                 android.R.drawable.ic_media_pause,
                 "Pause",
@@ -213,15 +228,6 @@ class AppMonitorService : Service() {
         try {
             val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
             val time = System.currentTimeMillis()
-            
-            // Refresh cached monitored apps periodically instead of every check
-            if (time - lastCacheUpdate > CACHE_REFRESH_INTERVAL_MS) {
-                cachedMonitoredApps = repository.allMonitoredApps.first()
-                    .associateBy { it.packageName }
-                lastCacheUpdate = time
-                // Update notification with count
-                updateNotification(cachedMonitoredApps.size)
-            }
             
             // Query only last 2 seconds for faster detection
             val usageStats = usageStatsManager.queryUsageStats(
@@ -338,13 +344,13 @@ class AppMonitorService : Service() {
             )
 
             val contentTitle = when {
-                isPaused -> "⏸️ Monitoring Paused"
-                else -> "✅ Intentionality Active"
+                isPaused -> "Monitoring Paused"
+                else -> "Intentionality Active"
             }
             
             val contentText = when {
                 isPaused -> "Tap Resume to continue monitoring"
-                monitoredAppCount > 0 -> "Watching $monitoredAppCount ${if (monitoredAppCount == 1) "app" else "apps"}"
+                monitoredAppCount > 0 -> "watching $monitoredAppCount number of apps"
                 else -> "No apps monitored • Tap to add apps"
             }
 
@@ -373,13 +379,14 @@ class AppMonitorService : Service() {
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(contentTitle)
                 .setContentText(contentText)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setSmallIcon(R.drawable.ic_notification_icon)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT) // Changed from LOW for visibility
                 .setCategory(NotificationCompat.CATEGORY_SERVICE)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(false)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE) // Show immediately
                 .addAction(
                     if (isPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause,
                     if (isPaused) "Resume" else "Pause",

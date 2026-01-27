@@ -28,6 +28,7 @@ import android.net.Uri
 import android.provider.Settings
 import com.mikepenz.iconics.compose.Image
 import com.mikepenz.iconics.typeface.library.fontawesome.FontAwesome
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,6 +44,13 @@ fun ProfileScreen(
     val isPremium by BillingManager.isPremium.collectAsState()
     val isLoading by BillingManager.isLoading.collectAsState()
     var isRestoring by remember { mutableStateOf(false) }
+    
+    // Theme and monitoring state
+    val isMonitoring by viewModel.isMonitoring.collectAsState()
+    val scope = rememberCoroutineScope()
+    
+    // Expandable states
+    var isMonitoringExpanded by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -310,6 +318,107 @@ fun ProfileScreen(
                             context.startActivity(intent)
                         }
                     )
+                    
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    
+                    // Continuous Monitoring Setting
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { isMonitoringExpanded = !isMonitoringExpanded }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Continuous Monitoring",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Continuous Monitoring",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = if (isMonitoring) "Active" else "Inactive",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isMonitoring) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = if (isMonitoringExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.ArrowDropDown,
+                                contentDescription = if (isMonitoringExpanded) "Collapse" else "Expand",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        
+                        if (isMonitoringExpanded) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                            ) {
+                                Text(
+                                    text = if (isMonitoring) 
+                                        "Continuous monitoring is currently active. The app will monitor your usage in the background and show intention prompts when you open monitored apps."
+                                    else 
+                                        "Enable continuous monitoring to automatically track app usage without requiring manual activation each time.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                )
+                                
+                                Button(
+                                    onClick = {
+                                        if (!isMonitoring) {
+                                            viewModel.startMonitoring()
+                                            Toast.makeText(
+                                                context,
+                                                "Continuous monitoring started",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else {
+                                            viewModel.stopMonitoring()
+                                            Toast.makeText(
+                                                context,
+                                                "Continuous monitoring stopped",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = if (isMonitoring) {
+                                        ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.error
+                                        )
+                                    } else {
+                                        ButtonDefaults.buttonColors()
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = if (isMonitoring) Icons.Default.Close else Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = if (isMonitoring) "Stop" else "Start",
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+                    }
                     
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     

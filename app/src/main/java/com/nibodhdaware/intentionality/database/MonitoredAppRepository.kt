@@ -1,8 +1,8 @@
 package com.nibodhdaware.intentionality.database
 
 import com.nibodhdaware.intentionality.billing.BillingManager
-import com.nibodhdaware.intentionality.firebase.FirebaseManager
-import com.nibodhdaware.intentionality.firebase.MonitoredAppData
+import com.nibodhdaware.intentionality.api.ApiManager
+import com.nibodhdaware.intentionality.api.MonitoredAppData
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.CoroutineDispatcher
@@ -39,8 +39,8 @@ class MonitoredAppRepository(
      */
     suspend fun syncToFirebase() {
         withContext(dispatcher) {
-            if (!BillingManager.hasProEntitlement() || !FirebaseManager.isUserSignedIn()) {
-                Log.d(TAG, "Skipping Firebase sync: User not Pro or not signed in.")
+            if (!BillingManager.hasProEntitlement() || !ApiManager.isUserSignedIn()) {
+                Log.d(TAG, "Skipping API sync: User not Pro or not signed in.")
                 return@withContext
             }
 
@@ -54,9 +54,9 @@ class MonitoredAppRepository(
                 )
             }
 
-            val result = FirebaseManager.syncMonitoredApps(monitoredAppDataList)
+            val result = ApiManager.syncMonitoredApps(monitoredAppDataList)
             result.onSuccess {
-                Log.d(TAG, "Monitored apps successfully synced to Firebase.")
+                Log.d(TAG, "Monitored apps successfully synced to API.")
             }.onFailure { e ->
                 Log.e(TAG, "Failed to sync monitored apps to Firebase: ${e.message}", e)
             }
@@ -69,16 +69,16 @@ class MonitoredAppRepository(
      */
     suspend fun fetchAndMergeFromFirebase() {
         withContext(dispatcher) {
-            if (!BillingManager.hasProEntitlement() || !FirebaseManager.isUserSignedIn()) {
-                Log.d(TAG, "Skipping Firebase fetch: User not Pro or not signed in.")
+            if (!BillingManager.hasProEntitlement() || !ApiManager.isUserSignedIn()) {
+                Log.d(TAG, "Skipping API fetch: User not Pro or not signed in.")
                 return@withContext
             }
 
-            val result = FirebaseManager.getMonitoredApps()
-            result.onSuccess { firebaseAppsData ->
-                Log.d(TAG, "Fetched ${firebaseAppsData.size} apps from Firebase.")
+            val result = ApiManager.getMonitoredApps()
+            result.onSuccess { apiAppsData ->
+                Log.d(TAG, "Fetched ${apiAppsData.size} apps from API.")
 
-                val firebaseApps = firebaseAppsData.map {
+                val firebaseApps = apiAppsData.map {
                     MonitoredApp(
                         packageName = it.packageName,
                         appName = it.appName,

@@ -31,7 +31,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import com.nibodhdaware.intentionality.billing.BillingManager // Added import
-import com.nibodhdaware.intentionality.firebase.FirebaseManager // Added import
+import com.nibodhdaware.intentionality.api.ApiManager // Added import
 import android.content.pm.PackageManager
 
 class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
@@ -293,8 +293,8 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                 Log.d(TAG, "Saved intention log locally: $appName, rating=$rating")
 
                 // Sync to Firebase if user is signed in and has Pro entitlement
-                if (FirebaseManager.isUserSignedIn() && BillingManager.hasProEntitlement()) {
-                    val saveResult = FirebaseManager.saveAppEntry(
+                if (ApiManager.isUserSignedIn() && BillingManager.hasProEntitlement()) {
+                    val saveResult = ApiManager.saveAppEntry(
                         appName = appName,
                         packageName = packageName,
                         reason = reason,

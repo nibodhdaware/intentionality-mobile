@@ -11,7 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.nibodhdaware.intentionality.IntentionalityApp
-import com.nibodhdaware.intentionality.firebase.FirebaseManager
+import com.nibodhdaware.intentionality.api.ApiManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,17 +34,16 @@ class LoginViewModel : ViewModel() {
     init {
         checkIfLoggedIn()
         Log.d("LoginViewModel", "LoginViewModel initialized")
-        Log.d("LoginViewModel", "Firebase Auth instance: ${FirebaseManager.getCurrentUser()}")
     }
 
     private fun checkIfLoggedIn() {
         viewModelScope.launch {
             try {
-                val user = FirebaseManager.getCurrentUser()
+                val user = ApiManager.getCurrentUser()
                 if (user != null) {
                     _uiState.value = _uiState.value.copy(
                         isLoggedIn = true,
-                        userId = user.uid
+                        userId = user.id
                     )
                 }
             } catch (e: Exception) {
@@ -110,23 +109,23 @@ class LoginViewModel : ViewModel() {
                 Log.d("LoginViewModel", "Family Name: ${googleIdTokenCredential.familyName}")
 
                 // Sign in to Firebase using the ID token
-                val authResult = FirebaseManager.signInWithGoogle(idToken)
+                val authResult = ApiManager.signInWithGoogle(idToken)
                 
                 authResult.onSuccess { user ->
-                    Log.d("LoginViewModel", "Firebase User ID: ${user.uid}")
-                    Log.d("LoginViewModel", "Firebase Email: ${user.email}")
+                    Log.d("LoginViewModel", "API User ID: ${user.id}")
+                    Log.d("LoginViewModel", "API Email: ${user.email}")
                     Log.d("LoginViewModel", "Display Name: ${user.displayName}")
                     
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         isLoggedIn = true,
-                        userId = user.uid
+                        userId = user.id
                     )
                 }.onFailure { error ->
-                    Log.e("LoginViewModel", "Firebase sign-in error", error)
+                    Log.e("LoginViewModel", "API sign-in error", error)
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = error.message ?: "Firebase authentication failed"
+                        error = error.message ?: "API authentication failed"
                     )
                 }
             } catch (e: Exception) {
@@ -163,13 +162,13 @@ class LoginViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(isLoading = true, error = null)
         
         return try {
-            val result = FirebaseManager.signInWithEmail(email, password)
+            val result = ApiManager.signInWithEmail(email, password)
             
             result.onSuccess { user ->
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     isLoggedIn = true,
-                    userId = user.uid
+                    userId = user.id
                 )
             }.onFailure { error ->
                 _uiState.value = _uiState.value.copy(
@@ -198,13 +197,13 @@ class LoginViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(isLoading = true, error = null)
         
         return try {
-            val result = FirebaseManager.signUpWithEmail(email, password)
+            val result = ApiManager.signUpWithEmail(email, password)
             
             result.onSuccess { user ->
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     isLoggedIn = true,
-                    userId = user.uid
+                    userId = user.id
                 )
             }.onFailure { error ->
                 _uiState.value = _uiState.value.copy(
@@ -235,7 +234,7 @@ class LoginViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(isLoading = true, error = null)
         
         return try {
-            val result = FirebaseManager.resetPassword(email)
+            val result = ApiManager.resetPassword(email)
             
             result.onSuccess {
                 _uiState.value = _uiState.value.copy(
@@ -262,7 +261,7 @@ class LoginViewModel : ViewModel() {
     fun signOut() {
         viewModelScope.launch {
             try {
-                FirebaseManager.signOut()
+                ApiManager.signOut()
                 _uiState.value = LoginUiState()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(

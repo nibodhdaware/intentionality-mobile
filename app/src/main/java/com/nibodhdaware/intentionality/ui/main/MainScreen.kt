@@ -18,17 +18,23 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.nibodhdaware.intentionality.ui.applist.AppListViewModel
+import kotlinx.coroutines.launch
+import android.content.Context
+import android.util.Log
 import com.nibodhdaware.intentionality.ui.appconfig.AppConfigScreen
 import com.nibodhdaware.intentionality.ui.applist.AppListScreen
 import com.nibodhdaware.intentionality.ui.billing.PaywallScreen
 import com.nibodhdaware.intentionality.ui.home.HomeScreen
 import com.nibodhdaware.intentionality.ui.profile.ProfileScreen
-import com.nibodhdaware.intentionality.ui.settings.SettingsScreen // Import SettingsScreen
+
 
 sealed class BottomNavItem(
     val route: String,
@@ -71,6 +77,20 @@ fun MainScreen(
     onNotificationPermissionRequested: () -> Unit = {}
 ) {
     val navController = rememberNavController()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val viewModel: AppListViewModel = viewModel()
+    val isMonitoring by viewModel.isMonitoring.collectAsState()
+    
+    // Auto-start monitoring if it was previously active
+    LaunchedEffect(Unit) {
+        val sharedPrefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        val wasMonitoring = sharedPrefs.getBoolean("is_monitoring", false)
+        if (wasMonitoring && !isMonitoring) {
+            Log.d("MainScreen", "Auto-starting monitoring from previous state")
+            viewModel.startMonitoring()
+        }
+    }
 
     NavHost(
         navController = navController,
@@ -112,16 +132,13 @@ fun MainScreen(
                 onNavigateToAppConfig = { packageName ->
                     navController.navigate("app_config/$packageName")
                 },
-                onNavigateToPaywall = {
-                    navController.navigate("paywall")
-                },
-                onNavigateToSettings = {
-                    navController.navigate("settings_route") // Navigate to settings
-                },
-                showFeatureDiscovery = showFeatureDiscovery,
-                onFeatureDiscoveryComplete = onFeatureDiscoveryComplete,
-                requestNotificationPermission = requestNotificationPermission,
-                onNotificationPermissionRequested = onNotificationPermissionRequested
+onNavigateToPaywall = {
+                     navController.navigate("paywall")
+                 },
+                 showFeatureDiscovery = showFeatureDiscovery,
+                 onFeatureDiscoveryComplete = onFeatureDiscoveryComplete,
+                 requestNotificationPermission = requestNotificationPermission,
+                 onNotificationPermissionRequested = onNotificationPermissionRequested
             )
         }
 
@@ -195,13 +212,6 @@ fun MainScreen(
             )
         }
 
-        // New composable for SettingsScreen
-        composable("settings_route") {
-            SettingsScreen(
-                onBack = {
-                    navController.popBackStack()
-                }
-            )
-        }
+        
     }
 }

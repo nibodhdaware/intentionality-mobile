@@ -13,9 +13,6 @@ import com.nibodhdaware.intentionality.ui.onboarding.OnboardingPreferences
 import com.nibodhdaware.intentionality.ui.onboarding.OnboardingScreen
 import com.nibodhdaware.intentionality.ui.billing.PaywallScreen
 import com.nibodhdaware.intentionality.ui.theme.IntentionalityTheme
-import com.nibodhdaware.intentionality.ui.theme.ThemePreferences
-import com.nibodhdaware.intentionality.ui.theme.ThemeMode
-import androidx.compose.foundation.isSystemInDarkTheme
 import kotlinx.coroutines.launch
 
 enum class AppScreen {
@@ -29,17 +26,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val context = LocalContext.current
-            val themePreferences = remember { ThemePreferences(context) }
-            val selectedThemeMode by themePreferences.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
-            
-            val useDarkTheme = when (selectedThemeMode) {
-                ThemeMode.SYSTEM -> isSystemInDarkTheme()
-                ThemeMode.LIGHT -> false
-                ThemeMode.DARK -> true
-            }
-            
-            IntentionalityTheme(darkTheme = useDarkTheme) {
+            IntentionalityTheme {
                 AppNavigator()
             }
         }
@@ -119,7 +106,7 @@ fun AppNavigator() {
         
         AppScreen.PAYWALL -> {
             PaywallScreen(
-                onDismiss = {
+                onNavigateBack = {
                     // Navigate to MainScreen after paywall is dismissed
                     currentScreen = AppScreen.MAIN
                 }

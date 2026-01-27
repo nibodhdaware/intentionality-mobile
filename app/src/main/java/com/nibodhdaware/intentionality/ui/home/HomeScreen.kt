@@ -20,8 +20,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -55,7 +56,6 @@ import java.util.*
 @Composable
 fun HomeScreen(
     onNavigateToAddApps: () -> Unit,
-    onNavigateToSettings: (() -> Unit)? = null,
     onNavigateToProfile: (() -> Unit)? = null, // New parameter for profile navigation
     onNavigateToAppConfig: ((String) -> Unit)? = null,
     onNavigateToPaywall: (() -> Unit)? = null,
@@ -180,27 +180,33 @@ fun HomeScreen(
                         text = "Intentionality",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
-                )
+                    )
                 },
                 actions = {
-                    onNavigateToProfile?.let { navigateToProfile ->
-                        IconButton(onClick = navigateToProfile) {
-                            Icon(
-                                imageVector = Icons.Default.Lock, // Placeholder for profile icon
-                                contentDescription = "Profile"
-                            )
-                        }
+                    IconButton(
+                        onClick = {
+                            if (isMonitoring) {
+                                viewModel.stopMonitoring()
+                            } else {
+                                viewModel.startMonitoring()
+                            }
+                        },
+                        modifier = Modifier.trackHighlight(highlightState, FeatureHighlight.START_MONITORING)
+                    ) {
+                        Icon(
+                            imageVector = if (isMonitoring) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isMonitoring) "Stop Monitoring" else "Start Monitoring",
+                            tint = if (isMonitoring) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
                     }
-                    onNavigateToSettings?.let { navigateToSettings ->
-                        IconButton(
-                            onClick = navigateToSettings,
-                            modifier = Modifier.trackHighlight(highlightState, FeatureHighlight.SETTINGS_BUTTON)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Settings"
-                            )
-                        }
+                    IconButton(
+                        onClick = { onNavigateToProfile?.invoke() },
+                        modifier = Modifier.trackHighlight(highlightState, FeatureHighlight.SETTINGS_BUTTON)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings"
+                        )
                     }
                 }
             )
@@ -228,7 +234,7 @@ fun HomeScreen(
                 .padding(horizontal = 16.dp),
             contentPadding = PaddingValues(bottom = 88.dp)
         ) {
-            // Monitoring Status Card
+            // Monitoring Status Card (simplified)
             item {
                 Card(
                     modifier = Modifier
@@ -241,7 +247,7 @@ fun HomeScreen(
                             .padding(16.dp)
                     ) {
                         Text(
-                            text = if (isMonitoring) "Monitoring Active" else "Monitoring Paused",
+                            text = if (isMonitoring) "Continuous Monitoring Active" else "Monitoring Inactive",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -249,58 +255,13 @@ fun HomeScreen(
                         Spacer(modifier = Modifier.height(4.dp))
                         
                         Text(
-                            text = "${installedApps.size} apps being monitored",
+                            text = if (isMonitoring) 
+                                "${installedApps.size} apps being monitored"
+                            else 
+                                "${installedApps.size} apps ready",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        // Start/Stop Monitoring Button
-                        Button(
-                            onClick = {
-                                if (isMonitoring) {
-                                    viewModel.stopMonitoring()
-                                } else {
-                                    if (monitoredApps.isEmpty()) {
-                                        android.widget.Toast.makeText(
-                                            context,
-                                            "Please add apps to monitor first",
-                                            android.widget.Toast.LENGTH_SHORT
-                                        ).show()
-                                        onNavigateToAddApps()
-                                    } else if (!hasUsageStatsPermission()) {
-                                        showUsagePermissionDialog = true
-                                    } else if (!hasOverlayPermission()) {
-                                        showOverlayPermissionDialog = true
-                                    } else {
-                                        viewModel.startMonitoring()
-                                    }
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .trackHighlight(highlightState, FeatureHighlight.START_MONITORING),
-                            colors = if (isMonitoring) {
-                                ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.error
-                                )
-                            } else {
-                                ButtonDefaults.buttonColors()
-                            }
-                        ) {
-                            Icon(
-                                imageVector = if (isMonitoring) Icons.Default.Check else Icons.Default.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (isMonitoring) "Stop Monitoring" else "Start Monitoring",
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
                     }
                 }
             }
@@ -314,6 +275,8 @@ fun HomeScreen(
                 ) {
                     DumbnessRatingGraph(
                         logs = todaysLogs,
+                        monitoredAppsCount = monitoredApps.size,
+                        isMonitoring = isMonitoring,
                         modifier = Modifier.fillMaxWidth()
                     )
                     
@@ -335,7 +298,7 @@ fun HomeScreen(
                                 verticalArrangement = Arrangement.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Lock,
+                                    imageVector = Icons.Default.Settings,
                                     contentDescription = null,
                                     modifier = Modifier.size(28.dp),
                                     tint = MaterialTheme.colorScheme.primary
@@ -613,6 +576,8 @@ fun MonitoredAppItem(
 @Composable
 fun DumbnessRatingGraph(
     logs: List<IntentionLog>,
+    monitoredAppsCount: Int = 0,
+    isMonitoring: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -669,6 +634,8 @@ fun DumbnessRatingGraph(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
+            
+
             
             Spacer(modifier = Modifier.height(16.dp))
             

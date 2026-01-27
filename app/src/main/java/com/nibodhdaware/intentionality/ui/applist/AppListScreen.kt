@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun AppListScreen(
     onNavigateBack: (() -> Unit)? = null,
+    onNavigateToPaywall: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     viewModel: AppListViewModel = viewModel()
 ) {
@@ -43,6 +44,7 @@ fun AppListScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val hasMoreApps by viewModel.hasMoreApps.collectAsState()
     var showPermissionDialog by remember { mutableStateOf(false) }
+    var showUpgradeDialog by remember { mutableStateOf(false) }
     
     // List state for pagination
     val listState = rememberLazyListState()
@@ -214,7 +216,11 @@ fun AppListScreen(
                         appInfo = appInfo,
                         isChecked = selectedApps.contains(appInfo.packageName),
                         onCheckedChange = {
-                            viewModel.toggleAppSelection(appInfo.packageName)
+                            val success = viewModel.toggleAppSelection(appInfo.packageName)
+                            if (!success) {
+                                // Free user hit their limit - show upgrade dialog
+                                showUpgradeDialog = true
+                            }
                         }
                     )
                 }
@@ -261,6 +267,32 @@ fun AppListScreen(
             dismissButton = {
                 TextButton(onClick = { showPermissionDialog = false }) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+    
+    // Upgrade dialog for free users hitting app limit
+    if (showUpgradeDialog) {
+        AlertDialog(
+            onDismissRequest = { showUpgradeDialog = false },
+            title = { Text("Upgrade to Premium") },
+            text = { 
+                Text("Free users can monitor up to 1 app. Upgrade to Premium to monitor unlimited apps and unlock all features!") 
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showUpgradeDialog = false
+                        onNavigateToPaywall?.invoke()
+                    }
+                ) {
+                    Text("Upgrade")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUpgradeDialog = false }) {
+                    Text("Maybe Later")
                 }
             }
         )

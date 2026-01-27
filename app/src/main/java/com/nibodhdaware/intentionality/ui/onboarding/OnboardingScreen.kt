@@ -25,11 +25,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -89,13 +87,13 @@ fun OnboardingScreen(
         ),
         // New page to explain the pop-up
         OnboardingPage(
-            icon = Icons.Default.ChatBubble,
+            icon = Icons.Default.Build,
             title = "How it Works: The Intention Prompt",
             description = "When you open a monitored app, a small pop-up will appear. This prompt asks you to briefly state your reason for opening the app, helping you be more intentional."
         ),
         // New interactive demo page
         OnboardingPage(
-            icon = Icons.Default.Lightbulb,
+            icon = Icons.Default.Info,
             title = "Try it Out!",
             description = "Imagine you're opening 'Make'. Type your intention below to see how it works.",
             isInteractive = true // Mark as interactive

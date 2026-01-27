@@ -23,7 +23,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.FlowPreview
 import java.util.Calendar
 import com.nibodhdaware.intentionality.billing.BillingManager
-import com.nibodhdaware.intentionality.firebase.FirebaseManager // Import FirebaseManager
+import com.nibodhdaware.intentionality.api.ApiManager // Import ApiManager
 
 private const val TAG = "AppListViewModel"
 
@@ -46,6 +46,12 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
         sharedPrefs.getBoolean("is_monitoring", false)
     )
     val isMonitoring: StateFlow<Boolean> = _isMonitoring.asStateFlow()
+    
+    // Initialize monitoring state on app start
+    init {
+        // Check if service is actually running and sync state
+        checkAndUpdateMonitoringState()
+    }
     
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -108,8 +114,8 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
             _isInitialized.value = true
             Log.d(TAG, "Loaded ${apps.size} apps")
 
-            // Fetch and merge from Firebase if user is premium and signed in
-            if (BillingManager.hasProEntitlement() && FirebaseManager.isUserSignedIn()) {
+            // Fetch and merge from API if user is premium and signed in
+            if (BillingManager.hasProEntitlement() && ApiManager.isUserSignedIn()) {
                 repository.fetchAndMergeFromFirebase()
             }
         }
@@ -131,6 +137,24 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }
+    
+    /**
+     * Check if the monitoring service is actually running and update the state accordingly
+     */
+    private fun checkAndUpdateMonitoringState() {
+        viewModelScope.launch {
+            try {
+                // This is a simple check - in a production app you might want more robust checking
+                val isActuallyMonitoring = sharedPrefs.getBoolean("is_monitoring", false)
+                if (isActuallyMonitoring && !_isMonitoring.value) {
+                    _isMonitoring.value = true
+                    Log.d(TAG, "Detected monitoring should be active, updating state")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error checking monitoring state", e)
+            }
+        }
     }
     
     // Not needed anymore but kept for compatibility
@@ -235,19 +259,56 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
 
     fun startMonitoring() {
         try {
+            Log.d(TAG, "=== Starting monitoring service ===")
             val context = getApplication<Application>()
+            
+            // Request battery optimization whitelist
+            requestBatteryOptimizationWhitelist(context)
+            
             val intent = Intent(context, AppMonitorService::class.java)
             
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                Log.d(TAG, "Starting foreground service")
                 ContextCompat.startForegroundService(context, intent)
             } else {
+                Log.d(TAG, "Starting regular service")
                 context.startService(intent)
             }
             
             _isMonitoring.value = true
             sharedPrefs.edit().putBoolean("is_monitoring", true).apply()
+            Log.d(TAG, "Monitoring service started, state updated to true")
         } catch (e: Exception) {
             Log.e(TAG, "Error starting monitoring", e)
+        }
+    }
+    
+    /**
+     * Request to whitelist the app from battery optimization
+     */
+    private fun requestBatteryOptimizationWhitelist(context: Context) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                val intent = android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                val packageName = context.packageName
+                val uri = android.net.Uri.parse("package:$packageName")
+                
+                val batteryIntent = Intent(intent, uri)
+                batteryIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                
+                // Check if we're already whitelisted
+                val powerManager = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                val isWhitelisted = powerManager.isIgnoringBatteryOptimizations(packageName)
+                
+                if (!isWhitelisted) {
+                    Log.d(TAG, "Requesting battery optimization whitelist")
+                    context.startActivity(batteryIntent)
+                } else {
+                    Log.d(TAG, "App is already whitelisted from battery optimization")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error requesting battery optimization whitelist", e)
         }
     }
 
@@ -261,6 +322,18 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
             sharedPrefs.edit().putBoolean("is_monitoring", false).apply()
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping monitoring", e)
+        }
+    }
+    
+    /**
+     * Disable continuous monitoring completely
+     */
+    fun disableContinuousMonitoring() {
+        try {
+            stopMonitoring()
+            Log.d(TAG, "Continuous monitoring disabled")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error disabling continuous monitoring", e)
         }
     }
     
