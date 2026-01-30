@@ -112,6 +112,12 @@ class LoginViewModel : ViewModel() {
                 val authResult = ApiManager.signInWithGoogle(idToken)
                 
                 authResult.onSuccess { user ->
+                    // Store Google profile data in ApiManager
+                    ApiManager.updateUserProfile(
+                        displayName = googleIdTokenCredential.displayName,
+                        photoUrl = googleIdTokenCredential.profilePictureUri?.toString()
+                    )
+                    
                     Log.d("LoginViewModel", "API User ID: ${user.id}")
                     Log.d("LoginViewModel", "API Email: ${user.email}")
                     Log.d("LoginViewModel", "Display Name: ${user.displayName}")

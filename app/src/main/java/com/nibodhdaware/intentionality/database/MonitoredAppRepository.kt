@@ -87,10 +87,9 @@ class MonitoredAppRepository(
                     )
                 }
 
-                // Clear local database and insert Firebase apps (Firebase is authoritative)
-                monitoredAppDao.clearAll()
-                firebaseApps.forEach { monitoredAppDao.insert(it) }
-                Log.d(TAG, "Local database updated with Firebase data.")
+                // Clear local database and insert Firebase apps in a single transaction
+                monitoredAppDao.clearAndInsertAll(firebaseApps)
+                Log.d(TAG, "Local database updated with Firebase data (transactional).")
 
             }.onFailure { e ->
                 Log.e(TAG, "Failed to fetch and merge monitored apps from Firebase: ${e.message}", e)

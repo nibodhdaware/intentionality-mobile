@@ -13,7 +13,7 @@ data class MonitoredApp(
     val customIntention: String = "", // Empty means use default prompt
     
     // Repeat interval - how often to show overlay
-    val intervalMinutes: Int = 5, // Show overlay every X minutes (default: 5)
+    val intervalMinutes: Int = 0, // Show overlay every X minutes (default: 0 = every time)
     
     // Legacy fields - kept for database schema compatibility, no longer used
     @Deprecated("Time window scheduling removed - monitoring is manual now")

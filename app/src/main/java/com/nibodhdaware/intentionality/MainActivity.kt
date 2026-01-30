@@ -14,6 +14,8 @@ import com.nibodhdaware.intentionality.ui.onboarding.OnboardingScreen
 import com.nibodhdaware.intentionality.ui.billing.PaywallScreen
 import com.nibodhdaware.intentionality.ui.theme.IntentionalityTheme
 import kotlinx.coroutines.launch
+import com.nibodhdaware.intentionality.service.AppMonitorService
+import android.content.Context
 
 enum class AppScreen {
     ONBOARDING,
@@ -29,6 +31,22 @@ class MainActivity : ComponentActivity() {
             IntentionalityTheme {
                 AppNavigator()
             }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Pause monitoring when the app is open
+        AppMonitorService.isPaused = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Resume monitoring when the app is closed, if it's supposed to be active
+        val sharedPrefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        val isMonitoringActive = sharedPrefs.getBoolean("is_monitoring", false)
+        if (isMonitoringActive) {
+            AppMonitorService.isPaused = false
         }
     }
 }

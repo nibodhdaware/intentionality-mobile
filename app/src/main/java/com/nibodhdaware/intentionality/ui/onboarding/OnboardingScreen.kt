@@ -13,8 +13,7 @@ import android.os.Process
 import android.provider.Settings
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.core.content.ContextCompat
-import kotlinx.coroutines.delay
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -31,28 +30,22 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import com.nibodhdaware.intentionality.R
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 data class OnboardingPage(
@@ -61,7 +54,8 @@ data class OnboardingPage(
     val description: String,
     val isPermission: Boolean = false,
     val permissionType: PermissionType? = null,
-    val isInteractive: Boolean = false // New parameter
+    val isInteractive: Boolean = false,
+    val iconRes: Int? = null // New parameter for drawable resources
 )
 
 enum class PermissionType {
@@ -82,6 +76,7 @@ fun OnboardingScreen(
     val pages = listOf(
         OnboardingPage(
             icon = Icons.Default.Star,
+            iconRes = R.mipmap.ic_launcher_foreground,
             title = "Welcome to Intentionality",
             description = "Be more mindful about your app usage. We'll need a few permissions to help you build better digital habits."
         ),
@@ -202,7 +197,7 @@ fun OnboardingScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                ) { pageIndex -> // Changed 'page' to 'pageIndex' to avoid confusion with OnboardingPage object
+                ) { pageIndex -> 
                     val currentPageObject = pages[pageIndex]
                     
                     if (currentPageObject.isInteractive) {
@@ -213,7 +208,7 @@ fun OnboardingScreen(
                     } else {
                         OnboardingPageContent(
                             page = currentPageObject,
-                            context = context, // Pass context here
+                            context = context,
                             onInteraction = { /* Not used for non-interactive pages */ }
                         )
                     }
@@ -406,7 +401,7 @@ private fun OnboardingPopupDemoContent(
 @Composable
 private fun OnboardingPageContent(
     page: OnboardingPage,
-    context: Context, // Re-added context parameter
+    context: Context,
     onInteraction: (Boolean) -> Unit = { }
 ) {
     Column(
@@ -420,9 +415,9 @@ private fun OnboardingPageContent(
         val infiniteTransition = rememberInfiniteTransition(label = "icon")
         val scale by infiniteTransition.animateFloat(
             initialValue = 1f,
-            targetValue = 1.1f,
+            targetValue = 1.05f,
             animationSpec = infiniteRepeatable(
-                animation = tween(1000),
+                animation = tween(1500, easing = LinearOutSlowInEasing),
                 repeatMode = RepeatMode.Reverse
             ),
             label = "scale"
@@ -435,12 +430,20 @@ private fun OnboardingPageContent(
                 .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = page.icon,
-                contentDescription = null,
-                modifier = Modifier.size(70.dp),
-                tint = MaterialTheme.colorScheme.onPrimaryContainer
-            )
+            if (page.iconRes != null) {
+                Image(
+                    painter = painterResource(id = page.iconRes),
+                    contentDescription = null,
+                    modifier = Modifier.size(90.dp).scale(scale)
+                )
+            } else {
+                Icon(
+                    imageVector = page.icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(70.dp).scale(scale),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
         }
         
         Spacer(modifier = Modifier.height(40.dp))

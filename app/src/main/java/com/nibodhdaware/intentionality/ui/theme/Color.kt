@@ -6,10 +6,11 @@ import androidx.compose.ui.graphics.Color
 // Based on Material 3 guidelines with a neutral dark palette
 
 // Primary colors - Soft teal/cyan accent
-val Primary = Color(0xFF80CBC4)           // Soft teal - main accent
+val Primary = Color(0xFF80CBC4)           // Soft teal - main accent (Master Teal)
 val OnPrimary = Color(0xFF003733)         // Dark teal for text on primary
-val PrimaryContainer = Color(0xFF004D46)  // Darker teal for containers
+val PrimaryContainer = Color(0xFF004D46)  // Deep Teal for containers
 val OnPrimaryContainer = Color(0xFFA7F3EC) // Light teal for text on container
+val MistTeal = Color(0x1A80CBC4)          // Soft Teal @ 10% alpha (for glassmorphism)
 
 // Secondary colors - Muted blue-gray
 val Secondary = Color(0xFFB0BEC5)          // Blue-gray accent

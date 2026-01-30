@@ -12,6 +12,9 @@ import kotlinx.coroutines.flow.Flow
 interface MonitoredAppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(monitoredApp: MonitoredApp)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(monitoredApps: List<MonitoredApp>)
     
     @Update
     suspend fun update(monitoredApp: MonitoredApp)
@@ -27,4 +30,10 @@ interface MonitoredAppDao {
 
     @Query("DELETE FROM monitored_apps")
     suspend fun clearAll()
+
+    @androidx.room.Transaction
+    suspend fun clearAndInsertAll(apps: List<MonitoredApp>) {
+        clearAll()
+        insertAll(apps)
+    }
 }

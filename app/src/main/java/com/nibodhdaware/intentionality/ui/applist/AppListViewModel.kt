@@ -69,6 +69,9 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
 
     val monitoredApps: StateFlow<List<MonitoredApp>>
     
+    // Filtered monitored apps that are actually installed on the device
+    val installedMonitoredApps: StateFlow<List<MonitoredApp>>
+    
     // All installed apps loaded once at startup
     private val _allApps = MutableStateFlow<List<AppInfo>>(emptyList())
     val installedApps: StateFlow<List<AppInfo>> = _allApps.asStateFlow()
@@ -84,6 +87,21 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
 
         monitoredApps = repository.allMonitoredApps
             .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        
+        // Filter monitored apps to only those that are currently installed
+        installedMonitoredApps = monitoredApps.map { apps ->
+            withContext(Dispatchers.IO) {
+                val pm = getApplication<Application>().packageManager
+                apps.filter { app ->
+                    try {
+                        pm.getPackageInfo(app.packageName, 0)
+                        true
+                    } catch (e: Exception) {
+                        false
+                    }
+                }
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
         
         // Get start of today for log filtering
         val calendar = Calendar.getInstance().apply {

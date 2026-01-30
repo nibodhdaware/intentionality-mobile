@@ -229,7 +229,10 @@ fun AppConfigScreen(
                     }
                     
                     Text(
-                        text = if (isPremium) "Show overlay every $intervalMinutes ${if (intervalMinutes == 1) "minute" else "minutes"}" else "Customize how often the intention prompt appears",
+                        text = if (isPremium) {
+                            if (intervalMinutes == 0) "Show overlay every time you open the app"
+                            else "Show overlay every $intervalMinutes ${if (intervalMinutes == 1) "minute" else "minutes"}"
+                        } else "Customize how often the intention prompt appears",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -238,8 +241,8 @@ fun AppConfigScreen(
                         Slider(
                             value = intervalMinutes.toFloat(),
                             onValueChange = { intervalMinutes = it.toInt() },
-                            valueRange = 1f..60f,
-                            steps = 58
+                            valueRange = 0f..60f,
+                            steps = 59
                         )
                         
                         // Quick presets
@@ -247,7 +250,7 @@ fun AppConfigScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            listOf(5, 10, 15, 30, 60).forEach { minutes ->
+                            listOf(0, 5, 15, 30, 60).forEach { minutes ->
                                 FilledTonalButton(
                                     onClick = { intervalMinutes = minutes },
                                     modifier = Modifier.weight(1f),
@@ -259,11 +262,12 @@ fun AppConfigScreen(
                                     } else {
                                         ButtonDefaults.filledTonalButtonColors()
                                     },
-                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+                                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 8.dp)
                                 ) {
                                     Text(
-                                        text = "$minutes",
-                                        fontWeight = FontWeight.Bold
+                                        text = if (minutes == 0) "Every" else "$minutes",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.labelSmall
                                     )
                                 }
                             }
@@ -277,7 +281,7 @@ fun AppConfigScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = "Default: Every 15 minutes",
+                                text = "Default: Every time",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -318,7 +322,8 @@ fun AppConfigScreen(
                     )
                     
                     Text(
-                        text = "• Shows overlay every $intervalMinutes ${if (intervalMinutes == 1) "minute" else "minutes"}",
+                        text = if (intervalMinutes == 0) "• Shows overlay every time you open the app"
+                        else "• Shows overlay every $intervalMinutes ${if (intervalMinutes == 1) "minute" else "minutes"}",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     

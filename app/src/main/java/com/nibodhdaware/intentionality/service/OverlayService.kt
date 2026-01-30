@@ -33,11 +33,17 @@ import kotlinx.coroutines.launch
 import com.nibodhdaware.intentionality.billing.BillingManager // Added import
 import com.nibodhdaware.intentionality.api.ApiManager // Added import
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 
 class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
     private var windowManager: WindowManager? = null
     private var overlayView: ComposeView? = null
+    private var audioManager: AudioManager? = null
+    private var audioFocusRequest: AudioFocusRequest? = null
+    
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val store = ViewModelStore()
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
@@ -47,8 +53,6 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
     
     // Debouncing and state management
     private var isOverlayShowing = false
-    private var lastDismissTime = 0L
-    private val DISMISS_DEBOUNCE_MS = 2000L  // Increased from 1000L to prevent glitching
 
     companion object {
         private const val TAG = "OverlayService"
@@ -66,7 +70,41 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
         super.onCreate()
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.currentState = Lifecycle.State.CREATED
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         Log.d(TAG, "OverlayService created")
+    }
+
+    private fun requestFocusAndPauseAudio() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val playbackAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            
+            audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                .setAudioAttributes(playbackAttributes)
+                .setAcceptsDelayedFocusGain(true)
+                .setOnAudioFocusChangeListener { }
+                .build()
+            
+            audioFocusRequest?.let {
+                audioManager?.requestAudioFocus(it)
+                Log.d(TAG, "Audio focus requested - background audio should pause")
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager?.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { audioManager?.abandonAudioFocusRequest(it) }
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager?.abandonAudioFocus(null)
+        }
+        Log.d(TAG, "Audio focus abandoned")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -76,22 +114,12 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
         val packageName = intent?.getStringExtra(EXTRA_PACKAGE_NAME) ?: ""
         val customIntention = intent?.getStringExtra(EXTRA_CUSTOM_INTENTION) ?: ""
 
-        Log.d(TAG, "Showing overlay for app: $appName ($packageName), customIntention: ${if (customIntention.isNotBlank()) "'$customIntention'" else "(default)"}")
+        // Prevent showing multiple overlays if already showing
+        if (isOverlayShowing) return START_NOT_STICKY
 
-        // Debounce check - prevent rapid recreation
-        val currentTime = System.currentTimeMillis()
-        if (isOverlayShowing && currentTime - lastDismissTime < DISMISS_DEBOUNCE_MS) {
-            Log.d(TAG, "⚠️ Ignoring overlay request - too soon after dismissal (${currentTime - lastDismissTime}ms)")
-            return START_NOT_STICKY
-        }
-
-        // Dismiss any existing overlay first
-        dismissOverlay()
-
-        // Store the monitored package name
         monitoredPackageName = packageName
-
-        // Show new overlay
+        
+        requestFocusAndPauseAudio()
         showOverlay(appName, packageName, customIntention)
 
         return START_NOT_STICKY
@@ -114,13 +142,14 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                 layoutType,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                PixelFormat.TRANSLUCENT
+                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                        WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                PixelFormat.OPAQUE
             )
 
             params.gravity = Gravity.CENTER
-            // Prevent keyboard from showing and interfering with overlay
-            params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+            // Allow the window to receive input focus so the keyboard works
+            params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
 
             // Create ComposeView for the overlay
             overlayView = ComposeView(this).apply {
@@ -137,24 +166,17 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                             Log.d(TAG, "Overlay submitted: reason='$reason', rating=$rating")
                             // Save to database
                             saveIntentionLog(packageName, appName, reason, rating)
-                            // Reset flags FIRST before any other action
-                            AppMonitorService.isOverlayVisible = false
-                            AppMonitorService.currentMonitoredApp = null
+                            // Mark as proceeded - this starts the interval timer
+                            AppMonitorService.recordProceed(packageName)
                             launchApp(packageName)
                             dismissOverlay()
                             stopSelf()
                         },
                         onGoBack = {
                             Log.d(TAG, "Go back pressed")
-                            // Mark this app to reset timer to now (interval restarts)
-                            monitoredPackageName?.let { pkg ->
-                                AppMonitorService.appsToResetTimer.add(pkg)
-                                Log.d(TAG, "Marked $pkg for timer reset")
-                            }
-                            // Reset flags FIRST before any other action
-                            AppMonitorService.isOverlayVisible = false
-                            AppMonitorService.currentMonitoredApp = null
-                            goToHomeScreen()
+                            // Reset flags via centralized method
+                            AppMonitorService.recordDismissal(packageName)
+                            forceKillAndGoHome()
                             dismissOverlay()
                             stopSelf()
                         }
@@ -214,8 +236,12 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                 }
                 
                 // Also kill background processes as backup
-                activityManager.killBackgroundProcesses(packageName)
-                Log.d(TAG, "Killed background processes for: $packageName")
+                try {
+                    activityManager.killBackgroundProcesses(packageName)
+                    Log.d(TAG, "Killed background processes for: $packageName")
+                } catch (se: SecurityException) {
+                    Log.w(TAG, "SecurityException: Cannot kill background processes for $packageName. This is common on newer Android versions.")
+                }
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to force kill app: $packageName", e)
@@ -244,6 +270,8 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                 val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
                 activityManager.killBackgroundProcesses(packageName)
                 Log.d(TAG, "Killed app: $packageName")
+            } catch (se: SecurityException) {
+                Log.w(TAG, "SecurityException: Cannot kill app $packageName")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to kill app: $packageName", e)
             }
@@ -252,11 +280,10 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
     
     private fun dismissOverlay() {
         try {
+            abandonAudioFocus()
             // Reset ALL flags when dismissing
-            AppMonitorService.isOverlayVisible = false
-            AppMonitorService.currentMonitoredApp = null
+            AppMonitorService.recordDismissal(monitoredPackageName)
             isOverlayShowing = false
-            lastDismissTime = System.currentTimeMillis()
             
             // Only change lifecycle state if it's valid
             if (lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.CREATED)) {
@@ -267,7 +294,7 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                 try {
                     if (overlayView?.isAttachedToWindow == true) {
                         windowManager?.removeView(overlayView)
-                        Log.d(TAG, "Overlay dismissed at ${lastDismissTime}")
+                        Log.d(TAG, "Overlay dismissed")
                     }
                 } catch (e: IllegalArgumentException) {
                     Log.w(TAG, "View was not attached to window manager")
@@ -323,6 +350,7 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
 
     override fun onDestroy() {
         Log.d(TAG, "OverlayService destroyed")
+        abandonAudioFocus()
         // Reset ALL flags
         AppMonitorService.isOverlayVisible = false
         AppMonitorService.currentMonitoredApp = null

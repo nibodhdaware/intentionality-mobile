@@ -16,7 +16,7 @@ sealed class Screen(val route: String) {
 @Composable
 fun NavGraph(
     navController: NavHostController,
-    startDestination: String = Screen.Login.route,
+    startDestination: String = Screen.Main.route,
     modifier: Modifier = Modifier
 ) {
     NavHost(

@@ -177,6 +177,13 @@ object ApiManager {
             preferences.clear()
         }
     }
+
+    suspend fun updateUserProfile(displayName: String?, photoUrl: String?) {
+        dataStore.edit { preferences ->
+            if (displayName != null) preferences[USER_DISPLAY_NAME_KEY] = displayName
+            if (photoUrl != null) preferences[USER_PHOTO_URL_KEY] = photoUrl
+        }
+    }
     
     suspend fun getCurrentUser(): ApiUser? {
         return try {

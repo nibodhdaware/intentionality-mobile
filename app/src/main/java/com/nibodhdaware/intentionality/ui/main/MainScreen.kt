@@ -82,16 +82,6 @@ fun MainScreen(
     val viewModel: AppListViewModel = viewModel()
     val isMonitoring by viewModel.isMonitoring.collectAsState()
     
-    // Auto-start monitoring if it was previously active
-    LaunchedEffect(Unit) {
-        val sharedPrefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-        val wasMonitoring = sharedPrefs.getBoolean("is_monitoring", false)
-        if (wasMonitoring && !isMonitoring) {
-            Log.d("MainScreen", "Auto-starting monitoring from previous state")
-            viewModel.startMonitoring()
-        }
-    }
-
     NavHost(
         navController = navController,
         startDestination = BottomNavItem.MyUsage.route,
@@ -127,14 +117,15 @@ fun MainScreen(
                     navController.navigate("add_apps")
                 },
                 onNavigateToProfile = {
-                    navController.navigate("profile")
+                    navController.navigate("settings")
                 },
                 onNavigateToAppConfig = { packageName ->
                     navController.navigate("app_config/$packageName")
                 },
-onNavigateToPaywall = {
+                onNavigateToPaywall = {
                      navController.navigate("paywall")
                  },
+                 viewModel = viewModel,
                  showFeatureDiscovery = showFeatureDiscovery,
                  onFeatureDiscoveryComplete = onFeatureDiscoveryComplete,
                  requestNotificationPermission = requestNotificationPermission,
@@ -173,7 +164,7 @@ onNavigateToPaywall = {
             }
         }
 
-        composable("profile") {
+        composable("settings") {
             ProfileScreen(
                 onLogout = onLogout,
                 onNavigateBack = {
@@ -192,7 +183,8 @@ onNavigateToPaywall = {
                 },
                 onNavigateToPaywall = {
                     navController.navigate("paywall")
-                }
+                },
+                viewModel = viewModel
             )
         }
         
@@ -208,7 +200,8 @@ onNavigateToPaywall = {
                 },
                 onNavigateToPaywall = {
                     navController.navigate("paywall")
-                }
+                },
+                viewModel = viewModel
             )
         }
 

@@ -7,8 +7,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -28,19 +30,15 @@ class AppMonitorService : Service() {
 
     private lateinit var repository: MonitoredAppRepository
     
-    private var lastDetectedApp: String? = null
     private var cachedMonitoredApps: Map<String, MonitoredApp> = emptyMap() // Changed to store full app data
     private var lastCacheUpdate: Long = 0L
-    
-    // Track last overlay time for each app (for interval-based display)
-    private val lastOverlayTime = mutableMapOf<String, Long>()
     
     companion object {
         private const val TAG = "AppMonitorService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "app_monitor_channel"
         private const val CACHE_REFRESH_INTERVAL_MS = 10000L // Refresh cache every 10 seconds
-        private const val CHECK_INTERVAL_MS = 1000L // Check every 1 second
+        private const val CHECK_INTERVAL_MS = 250L // Check every 250ms for faster detection
         
         // Notification action constants
         const val ACTION_PAUSE = "com.nibodhdaware.intentionality.ACTION_PAUSE"
@@ -52,8 +50,36 @@ class AppMonitorService : Service() {
         var currentMonitoredApp: String? = null // Track which app is currently being monitored
         var isPaused = false // Track if monitoring is paused
         
-        // Apps where user pressed Go Back - reset their timer to now
-        val appsToResetTimer = mutableSetOf<String>()
+        // Persist tracking across service recreations
+        private var lastDetectedApp: String? = null
+        private val lastOverlayTime = mutableMapOf<String, Long>()
+        
+        // Track when an app's overlay was last dismissed to prevent immediate re-triggering (cool down)
+        val lastDismissedTime = mutableMapOf<String, Long>()
+        private const val COOL_DOWN_MS = 1000L // Reduced to 1s for better responsiveness
+
+        /**
+         * Record that an overlay was dismissed (either Proceed or Go Back)
+         * This ensures the cooldown is active and flags are reset correctly.
+         */
+        fun recordDismissal(packageName: String?) {
+            Log.d(TAG, "Recording dismissal for: $packageName")
+            isOverlayVisible = false
+            currentMonitoredApp = null
+            packageName?.let {
+                lastDismissedTime[it] = System.currentTimeMillis()
+            }
+        }
+
+        /**
+         * Record that a user has proceeded past the prompt.
+         * This starts the interval timer so they won't be prompted again for the specified duration.
+         */
+        fun recordProceed(packageName: String) {
+            Log.d(TAG, "Recording proceed for: $packageName")
+            lastOverlayTime[packageName] = System.currentTimeMillis()
+            recordDismissal(packageName)
+        }
     }
 
     override fun onCreate() {
@@ -75,6 +101,17 @@ class AppMonitorService : Service() {
                     updateNotification(cachedMonitoredApps.size)
                 }
             }
+
+            // Start the monitoring loop here so it only runs once
+            scope.launch(Dispatchers.IO) {
+                while (true) {
+                    if (!isPaused) {
+                        checkForegroundApp()
+                    }
+                    delay(CHECK_INTERVAL_MS)
+                }
+            }
+            Log.d(TAG, "Monitoring loop started in onCreate")
         } catch (e: Exception) {
             Log.e(TAG, "Error in service onCreate", e)
         }
@@ -107,15 +144,6 @@ class AppMonitorService : Service() {
             }
         }
         
-        scope.launch(Dispatchers.IO) {
-            while (true) {
-                if (!isPaused) {
-                    checkForegroundApp()
-                }
-                delay(CHECK_INTERVAL_MS) // Check every 1 second
-            }
-        }
-        Log.d(TAG, "Monitoring loop started, checking every ${CHECK_INTERVAL_MS}ms")
         return START_STICKY
     }
 
@@ -239,9 +267,13 @@ class AppMonitorService : Service() {
             val foregroundApp = usageStats?.maxByOrNull { it.lastTimeUsed }?.packageName
             
             // If overlay is visible and the monitored app is no longer foreground, dismiss overlay
+            // BUT, only if the new foreground app is NOT our own app (the overlay itself)
             if (isOverlayVisible && currentMonitoredApp != null) {
-                if (foregroundApp != currentMonitoredApp && foregroundApp != packageName) {
-                    Log.d(TAG, "📱 Monitored app ($currentMonitoredApp) is no longer foreground. Dismissing overlay.")
+                if (foregroundApp != null && 
+                    foregroundApp != currentMonitoredApp && 
+                    foregroundApp != packageName // Don't dismiss if we are the foreground (overlay)
+                ) {
+                    Log.d(TAG, "📱 Monitored app ($currentMonitoredApp) is no longer foreground. New foreground: $foregroundApp. Dismissing overlay.")
                     dismissCurrentOverlay()
                 }
                 return // Don't show new overlay while one is visible
@@ -258,14 +290,15 @@ class AppMonitorService : Service() {
                 cachedMonitoredApps.containsKey(foregroundApp) &&
                 !isOverlayVisible // Don't show if overlay is already visible
             ) {
-                // Check if this app needs timer reset (user pressed Go Back)
-                if (appsToResetTimer.contains(foregroundApp)) {
-                    appsToResetTimer.remove(foregroundApp)
-                    lastOverlayTime.remove(foregroundApp) // Clear timer so popup shows immediately
-                    Log.d(TAG, "🔄 Timer cleared for $foregroundApp - popup will show now")
-                    // Don't return - let it continue to show the popup
+                // Check if this app is in cool down after dismissal
+                val lastDismissed = lastDismissedTime[foregroundApp] ?: 0L
+                if (time - lastDismissed < COOL_DOWN_MS) {
+                    if (foregroundApp != lastDetectedApp) {
+                        Log.d(TAG, "❄️ App $foregroundApp is in cool down (${time - lastDismissed}ms), skipping overlay")
+                    }
+                    return
                 }
-                
+
                 val monitoredApp = cachedMonitoredApps[foregroundApp]!!
                 
                 // Check if we're within the active time window
@@ -275,12 +308,14 @@ class AppMonitorService : Service() {
                     val intervalMs = monitoredApp.intervalMinutes * 60 * 1000L
                     val timeSinceLastOverlay = time - lastTime
                     
-                    if (timeSinceLastOverlay >= intervalMs) {
+                    // Show if:
+                    // 1. Enough time has passed since last overlay AND
+                    // 2. Either it's a periodic reminder (interval > 0) OR the app was just newly detected
+                    if (timeSinceLastOverlay >= intervalMs && (monitoredApp.intervalMinutes > 0 || foregroundApp != lastDetectedApp)) {
                         Log.d(TAG, "✅ Showing prompt for: $foregroundApp (interval: ${monitoredApp.intervalMinutes} min, time since last: ${timeSinceLastOverlay / 60000} min)")
                         lastDetectedApp = foregroundApp
                         currentMonitoredApp = foregroundApp
                         isOverlayVisible = true
-                        lastOverlayTime[foregroundApp] = time
                         showPrompt(foregroundApp, monitoredApp.customIntention)
                     } else {
                         val minutesRemaining = (intervalMs - timeSinceLastOverlay) / 60000
@@ -318,8 +353,7 @@ class AppMonitorService : Service() {
         try {
             val intent = Intent(this, OverlayService::class.java)
             stopService(intent)
-            isOverlayVisible = false
-            currentMonitoredApp = null
+            recordDismissal(currentMonitoredApp)
         } catch (e: Exception) {
             Log.e(TAG, "Error dismissing overlay", e)
         }
@@ -422,6 +456,34 @@ class AppMonitorService : Service() {
         Log.d(TAG, "All app timers reset")
     }
 
+    private fun showPermissionNotification() {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        
+        // Use a different ID for permission warning so it doesn't replace the main service notification
+        val PERMISSION_NOTIFICATION_ID = 1002
+        
+        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, 
+            3, 
+            intent, 
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Permission Required")
+            .setContentText("Overlay permission is needed to show intention prompts. Tap to grant.")
+            .setSmallIcon(R.drawable.ic_notification_icon)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+            
+        notificationManager.notify(PERMISSION_NOTIFICATION_ID, notification)
+    }
+
     private fun showPrompt(packageName: String, customIntention: String = "") {
         try {
             Log.d(TAG, "===== showPrompt called for: $packageName =====")
@@ -441,6 +503,11 @@ class AppMonitorService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 if (!android.provider.Settings.canDrawOverlays(this)) {
                     Log.e(TAG, "❌ SYSTEM_ALERT_WINDOW permission not granted!")
+                    isOverlayVisible = false
+                    currentMonitoredApp = null
+                    
+                    // Notify user about missing permission
+                    showPermissionNotification()
                     return
                 }
             }
