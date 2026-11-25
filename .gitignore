@@ -13,3 +13,10 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Signing material and release artifacts
+keystore.properties
+*.jks
+*.keystore
+app/release/
+.kotlin/

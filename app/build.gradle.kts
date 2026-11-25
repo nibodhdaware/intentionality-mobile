@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,6 +8,38 @@ plugins {
     kotlin("plugin.serialization") version "2.0.21"
     
     
+}
+
+// Release signing is read from keystore.properties (git-ignored) or the
+// RELEASE_STORE_* environment variables. If neither is present, the release
+// build still runs but produces an unsigned APK.
+val keystoreProperties = Properties().apply {
+    val propertiesFile = rootProject.file("keystore.properties")
+    if (propertiesFile.exists()) {
+        propertiesFile.inputStream().use { load(it) }
+    }
+}
+
+fun signingValue(key: String, envName: String): String? =
+    keystoreProperties.getProperty(key) ?: System.getenv(envName)
+
+val releaseStoreFile = signingValue("storeFile", "RELEASE_STORE_FILE")
+val releaseStorePassword = signingValue("storePassword", "RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = signingValue("keyAlias", "RELEASE_KEY_ALIAS")
+val releaseKeyPassword = signingValue("keyPassword", "RELEASE_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
+if (!hasReleaseSigning) {
+    logger.warn(
+        "Release signing is not configured. Set keystore.properties " +
+            "(see keystore.properties.example) or the RELEASE_STORE_* environment " +
+            "variables. The release APK will be unsigned."
+    )
 }
 
 android {
@@ -22,8 +56,20 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

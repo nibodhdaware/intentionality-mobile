@@ -3,20 +3,17 @@
    Backup rules for Android Auto Backup (Android 5.0 - Android 11)
    This ensures app data persists across reinstalls via Google Account backup.
    See https://developer.android.com/guide/topics/data/autobackup
+
+   Cache and no_backup directories are excluded from Auto Backup by the
+   platform; they must not be listed here.
 -->
 <full-backup-content>
     <!-- Include all shared preferences (onboarding state, settings, etc.) -->
     <include domain="sharedpref" path="." />
-    
+
     <!-- Include Room database (monitored apps, intention logs, etc.) -->
     <include domain="database" path="." />
-    
+
     <!-- Include DataStore preferences -->
     <include domain="file" path="datastore/" />
-    
-    <!-- Exclude cache files -->
-    <exclude domain="cache" path="." />
-    
-    <!-- Exclude no-backup files if any -->
-    <exclude domain="file" path="no_backup/" />
 </full-backup-content>
